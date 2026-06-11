@@ -35,6 +35,9 @@ Use it when you want to:
 - Copy or download the cleaned HTML output.
 - Preview desktop, tablet, and mobile widths.
 - Hide or show the source panel when you want a larger visual workspace.
+- Navigate detected slide decks with a bottom timeline and previous/next controls.
+- Insert a new slide after the active slide or duplicate the current slide.
+- Edit small CSV/TSV datasets in the Data panel and insert them as styled HTML tables.
 - Optional trusted-script mode for JavaScript-driven animations.
 
 ## How It Works
@@ -43,7 +46,7 @@ Cosmic Canvas has three main work areas:
 
 - **Source panel**: paste, inspect, or directly edit the HTML.
 - **Rendered page**: see the document as a live page and select elements visually.
-- **Inspector**: edit selected text and style properties without leaving the preview.
+- **Inspector/Data panel**: edit selected text and style properties, or shape tabular data and insert it into the preview.
 
 The app is intentionally browser-based. There is no required account, no backend service, and no document format lock-in. Your final output is still HTML.
 
@@ -127,8 +130,10 @@ flowchart TD
    - **Move** for dragging or nudging selected elements.
    - **Preview** for viewing the page without editor selection behavior.
 4. Use the inspector to adjust content, color, spacing, size, alignment, and shape.
-5. Preview the result at desktop, tablet, and mobile widths.
-6. Copy or download the cleaned HTML.
+5. For slide decks, use the timeline to move between slides, duplicate a slide, or insert a new slide.
+6. Use the Data panel to paste or edit CSV/TSV data, then insert it as a table into the active slide or page.
+7. Preview the result at desktop, tablet, and mobile widths.
+8. Copy or download the cleaned HTML.
 
 ## Trusted Scripts
 

@@ -127,16 +127,23 @@ const EDITOR_STYLE = `
   [contenteditable="true"] {
     cursor: text !important;
   }
+
+  [data-wysiwyg-current-slide="true"] {
+    box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.28) !important;
+  }
 `;
 
 const EDITOR_SCRIPT = String.raw`
 (() => {
   const NONE = "__wysiwyg_none__";
+  const SLIDE_SELECTOR = "section.slide, article.slide, section[data-title], section[data-section], [data-slide], [data-slide-id]";
   let mode = "text";
   let idCounter = 1;
   let selectedElement = null;
   let hoveredElement = null;
   let inputTimer = 0;
+  let deckTimer = 0;
+  let activeSlideId = "";
   let dragState = null;
 
   function nextId() {
@@ -167,9 +174,102 @@ const EDITOR_SCRIPT = String.raw`
       .join("");
   }
 
+  function slideCandidates() {
+    const selectors = [
+      "section.slide",
+      "article.slide",
+      "section[data-title]",
+      "section[data-section]",
+      "[data-slide]",
+      "[data-slide-id]"
+    ];
+    const seen = new Set();
+    const slides = [];
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach((element) => {
+        if (!(element instanceof Element)) return;
+        if (element.dataset.wysiwygEditor === "true") return;
+        if (element.closest('[data-wysiwyg-editor="true"]')) return;
+        if (seen.has(element)) return;
+        seen.add(element);
+        slides.push(element);
+      });
+    }
+    return slides;
+  }
+
+  function textFrom(element, selector) {
+    const target = element.querySelector(selector);
+    return target ? (target.textContent || "").replace(/\s+/g, " ").trim() : "";
+  }
+
+  function slideTitle(element, index) {
+    return (
+      element.getAttribute("data-title") ||
+      element.getAttribute("data-section") ||
+      element.getAttribute("aria-label") ||
+      textFrom(element, "h1") ||
+      textFrom(element, "h2") ||
+      textFrom(element, "h3") ||
+      "Slide " + (index + 1)
+    ).slice(0, 80);
+  }
+
+  function visibleArea(element) {
+    const rect = element.getBoundingClientRect();
+    const width = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+    const height = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+    return width * height;
+  }
+
+  function nearestSlide(slides) {
+    if (!slides.length) return null;
+    const selectedSlide = selectedElement ? selectedElement.closest(SLIDE_SELECTOR) : null;
+    if (selectedSlide && slides.includes(selectedSlide)) return selectedSlide;
+    const activeById = activeSlideId ? document.querySelector('[data-wysiwyg-id="' + CSS.escape(activeSlideId) + '"]') : null;
+    if (activeById && slides.includes(activeById)) return activeById;
+    return slides
+      .map((slide) => ({ slide, area: visibleArea(slide) }))
+      .sort((a, b) => b.area - a.area)[0]?.slide || slides[0];
+  }
+
+  function markActiveSlide(slide) {
+    document.querySelectorAll("[data-wysiwyg-current-slide]").forEach((element) => {
+      element.removeAttribute("data-wysiwyg-current-slide");
+    });
+    if (!slide) return;
+    activeSlideId = ensureId(slide);
+    slide.setAttribute("data-wysiwyg-current-slide", "true");
+  }
+
+  function publishDeck() {
+    const slides = slideCandidates();
+    if (!slides.length) {
+      post("wysiwyg-deck", { slides: [], activeId: "" });
+      return;
+    }
+    const activeSlide = nearestSlide(slides);
+    markActiveSlide(activeSlide);
+    post("wysiwyg-deck", {
+      activeId: activeSlide ? activeSlide.dataset.wysiwygId : "",
+      slides: slides.map((slide, index) => ({
+        id: ensureId(slide),
+        index,
+        title: slideTitle(slide, index),
+        section: slide.getAttribute("data-section") || slide.getAttribute("data-title") || ""
+      }))
+    });
+  }
+
+  function scheduleDeckPublish() {
+    window.clearTimeout(deckTimer);
+    deckTimer = window.setTimeout(publishDeck, 120);
+  }
+
   function publishChange(reason = "edit") {
     post("wysiwyg-document-change", { reason, html: serialize() });
     publishSelected();
+    scheduleDeckPublish();
   }
 
   function publishSelected() {
@@ -243,8 +343,19 @@ const EDITOR_SCRIPT = String.raw`
     }
     selectedElement = element;
     selectedElement.setAttribute("data-wysiwyg-selected", "true");
+    const selectedSlide = selectedElement.closest(SLIDE_SELECTOR);
+    if (selectedSlide) activeSlideId = ensureId(selectedSlide);
     if (mode === "text") makeEditable(selectedElement);
     if (mode !== "text") restoreContentEditable(selectedElement);
+    publishSelected();
+    scheduleDeckPublish();
+  }
+
+  function clearSelection() {
+    if (!selectedElement) return;
+    selectedElement.removeAttribute("data-wysiwyg-selected");
+    restoreContentEditable(selectedElement);
+    selectedElement = null;
     publishSelected();
   }
 
@@ -302,6 +413,172 @@ const EDITOR_SCRIPT = String.raw`
     const existing = selectedElement.style.transform || "";
     selectedElement.style.transform = ("translate(" + dx + "px, " + dy + "px) " + existing).trim();
     publishChange("move");
+  }
+
+  function goToSlide(payload) {
+    const slides = slideCandidates();
+    const slide = payload?.id
+      ? slides.find((candidate) => ensureId(candidate) === payload.id)
+      : slides[Number(payload?.index || 0)];
+    if (!slide) return;
+    clearSelection();
+    markActiveSlide(slide);
+    slide.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishDeck();
+  }
+
+  function clearEditorState(element) {
+    element.removeAttribute("data-wysiwyg-current-slide");
+    element.removeAttribute("data-wysiwyg-selected");
+    element.removeAttribute("data-wysiwyg-hover");
+    element.removeAttribute("data-wysiwyg-id");
+    element.querySelectorAll("[data-wysiwyg-id], [data-wysiwyg-selected], [data-wysiwyg-hover], [data-wysiwyg-current-slide]").forEach((child) => {
+      child.removeAttribute("data-wysiwyg-current-slide");
+      child.removeAttribute("data-wysiwyg-selected");
+      child.removeAttribute("data-wysiwyg-hover");
+      child.removeAttribute("data-wysiwyg-id");
+    });
+  }
+
+  function replaceFirstText(element, selector, text) {
+    const target = element.querySelector(selector);
+    if (!target) return false;
+    target.textContent = text;
+    return true;
+  }
+
+  function prepareNewSlide(slide) {
+    clearEditorState(slide);
+    slide.setAttribute("data-title", "New slide");
+    if (slide.classList.length === 0) slide.classList.add("slide");
+    if (!replaceFirstText(slide, "h1, h2, h3", "New slide")) {
+      const heading = document.createElement("h2");
+      heading.textContent = "New slide";
+      slide.prepend(heading);
+    }
+    if (!replaceFirstText(slide, "p", "Add your main point here.")) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = "Add your main point here.";
+      slide.append(paragraph);
+    }
+  }
+
+  function duplicateSlide(payload) {
+    const slides = slideCandidates();
+    const slide = payload?.id
+      ? slides.find((candidate) => ensureId(candidate) === payload.id)
+      : nearestSlide(slides);
+    if (!slide || !slide.parentElement) return;
+    const clone = slide.cloneNode(true);
+    clearEditorState(clone);
+    slide.after(clone);
+    clearSelection();
+    markActiveSlide(clone);
+    clone.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("duplicate-slide");
+  }
+
+  function insertSlide(payload) {
+    const slides = slideCandidates();
+    const slide = payload?.id
+      ? slides.find((candidate) => ensureId(candidate) === payload.id)
+      : nearestSlide(slides);
+    if (!slide || !slide.parentElement) return;
+    const clone = slide.cloneNode(true);
+    prepareNewSlide(clone);
+    slide.after(clone);
+    clearSelection();
+    markActiveSlide(clone);
+    clone.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("insert-slide");
+  }
+
+  function ensureDataTableStyle() {
+    if (document.getElementById("cosmic-canvas-data-style")) return;
+    const style = document.createElement("style");
+    style.id = "cosmic-canvas-data-style";
+    style.textContent = [
+      ".cosmic-data-block{width:100%;margin:24px 0;color:#1f2933;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}",
+      ".cosmic-data-block figcaption{margin:0 0 10px;color:#0f766e;font-size:14px;font-weight:800;letter-spacing:0;}",
+      ".cosmic-data-table{width:100%;border:1px solid #d7dde5;border-collapse:separate;border-spacing:0;border-radius:8px;overflow:hidden;background:#fff;font-size:14px;box-shadow:0 12px 30px rgba(31,41,51,.08);}",
+      ".cosmic-data-table th,.cosmic-data-table td{padding:11px 13px;border-bottom:1px solid #e5e9ee;text-align:left;vertical-align:top;}",
+      ".cosmic-data-table th{color:#26323f;background:#eef8f6;font-weight:800;}",
+      ".cosmic-data-table tr:last-child td{border-bottom:0;}"
+    ].join("");
+    document.head.append(style);
+  }
+
+  function textValue(value) {
+    return String(value ?? "").trim();
+  }
+
+  function payloadCells(values) {
+    return Array.isArray(values) ? values.map((value) => textValue(value)) : [];
+  }
+
+  function appendCell(row, tagName, text) {
+    const cell = document.createElement(tagName);
+    cell.textContent = text;
+    row.append(cell);
+  }
+
+  function dataInsertionPoint() {
+    const slide = nearestSlide(slideCandidates());
+    if (slide) return { element: slide, placement: "append" };
+    if (selectedElement && selectedElement !== document.body && selectedElement.parentElement) {
+      return { element: selectedElement, placement: "after" };
+    }
+    return { element: document.body, placement: "append" };
+  }
+
+  function insertDataTable(payload) {
+    let columns = payloadCells(payload?.columns);
+    const rows = Array.isArray(payload?.rows)
+      ? payload.rows.map((row) => payloadCells(row)).filter((row) => row.some((cell) => cell !== ""))
+      : [];
+    if (!columns.length || !rows.length) return;
+    columns = columns.map((column, index) => column || "Column " + (index + 1));
+
+    ensureDataTableStyle();
+
+    const figure = document.createElement("figure");
+    figure.className = "cosmic-data-block";
+    figure.setAttribute("data-cosmic-artifact", "data-table");
+
+    const title = textValue(payload?.title);
+    if (title) {
+      const caption = document.createElement("figcaption");
+      caption.textContent = title;
+      figure.append(caption);
+    }
+
+    const table = document.createElement("table");
+    table.className = "cosmic-data-table";
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    columns.forEach((column) => appendCell(headerRow, "th", column));
+    thead.append(headerRow);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tableRow = document.createElement("tr");
+      columns.forEach((_, index) => appendCell(tableRow, "td", row[index] || ""));
+      tbody.append(tableRow);
+    });
+
+    table.append(thead, tbody);
+    figure.append(table);
+
+    const insertion = dataInsertionPoint();
+    if (insertion.placement === "after") {
+      insertion.element.after(figure);
+    } else {
+      insertion.element.append(figure);
+    }
+
+    selectElement(figure);
+    figure.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("insert-table");
   }
 
   document.addEventListener("mouseover", (event) => {
@@ -380,15 +657,23 @@ const EDITOR_SCRIPT = String.raw`
     if (data.command === "apply-style") applyStyles(data.styles);
     if (data.command === "set-text") setText(data.text || "");
     if (data.command === "duplicate") duplicateSelected();
+    if (data.command === "duplicate-slide") duplicateSlide(data);
+    if (data.command === "insert-slide") insertSlide(data);
+    if (data.command === "insert-table") insertDataTable(data);
     if (data.command === "delete") deleteSelected();
+    if (data.command === "go-slide") goToSlide(data);
     if (data.command === "nudge") nudge(Number(data.dx || 0), Number(data.dy || 0));
     if (data.command === "request-html") publishChange("request");
   });
+
+  window.addEventListener("scroll", scheduleDeckPublish, true);
+  window.addEventListener("resize", scheduleDeckPublish);
 
   post("wysiwyg-ready", {
     title: document.title || "",
     bodyTextStart: (document.body ? document.body.textContent || "" : "").trim().slice(0, 180)
   });
+  publishDeck();
 })();
 `;
 
@@ -481,6 +766,9 @@ function removeEditorArtifacts(doc: Document) {
   doc.querySelectorAll("[data-wysiwyg-id]").forEach((element) => element.removeAttribute("data-wysiwyg-id"));
   doc.querySelectorAll("[data-wysiwyg-hover]").forEach((element) => element.removeAttribute("data-wysiwyg-hover"));
   doc.querySelectorAll("[data-wysiwyg-selected]").forEach((element) => element.removeAttribute("data-wysiwyg-selected"));
+  doc.querySelectorAll("[data-wysiwyg-current-slide]").forEach((element) =>
+    element.removeAttribute("data-wysiwyg-current-slide"),
+  );
   doc.querySelectorAll("[data-wysiwyg-original-contenteditable]").forEach((element) => {
     const original = element.getAttribute("data-wysiwyg-original-contenteditable");
     if (!original || original === NONE) {
