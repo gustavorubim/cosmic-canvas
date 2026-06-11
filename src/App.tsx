@@ -20,6 +20,7 @@ import {
   type SelectedElement,
   type Viewport,
 } from "./protocol";
+import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
 
 type HistoryState = {
   stack: string[];
@@ -69,13 +70,21 @@ function fileNameFromDate() {
   return `cosmic-canvas-${stamp}.html`;
 }
 
+function normalizeEditableSource(html: string) {
+  const normalized = normalizeHtmlInput(html);
+  return normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+}
+
 export default function App() {
   const initialHtml = useMemo(() => cleanEditorHtml(SAMPLE_HTML), []);
+  const vscodeApi = useMemo(() => getVsCodeApi(), []);
+  const isVsCode = Boolean(vscodeApi);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const didLoadUrlRef = useRef(false);
   const historyRef = useRef<HistoryState>({ stack: [initialHtml], index: 0 });
   const pendingHistoryTimer = useRef<number>();
+  const pendingHostChangeTimer = useRef<number>();
   const fileHandleRef = useRef<any>(null);
   const sourceHtmlRef = useRef(initialHtml);
   const lastScrollRef = useRef({ x: 0, y: 0 });
@@ -145,6 +154,23 @@ export default function App() {
     pendingHistoryTimer.current = window.setTimeout(() => pushHistory(html), 450);
   }
 
+  function postHostDocumentChange(html: string, reason: string, immediate = false) {
+    if (!vscodeApi) return;
+    if (pendingHostChangeTimer.current) {
+      window.clearTimeout(pendingHostChangeTimer.current);
+    }
+
+    const post = () => {
+      vscodeApi.postMessage({ type: "documentChanged", html, reason });
+    };
+
+    if (immediate) {
+      post();
+    } else {
+      pendingHostChangeTimer.current = window.setTimeout(post, 250);
+    }
+  }
+
   function renderHtml(html: string, trustedScripts = runTrustedScripts) {
     setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
     setDeckSlides([]);
@@ -155,15 +181,28 @@ export default function App() {
   }
 
   function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts) {
-    const normalized = normalizeHtmlInput(html);
-    const clean = normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+    const clean = normalizeEditableSource(html);
     setSourceHtml(clean);
     renderHtml(clean, trustedScripts);
     if (addToHistory) pushHistory(clean);
   }
 
   function applySource() {
-    loadHtml(sourceHtmlRef.current);
+    const clean = normalizeEditableSource(sourceHtmlRef.current);
+    loadHtml(clean);
+    postHostDocumentChange(clean, "apply-source", true);
+  }
+
+  function loadHostDocument(html: string) {
+    const clean = normalizeEditableSource(html);
+    setSourceHtml(clean);
+    renderHtml(clean);
+    syncHistoryState({ stack: [clean], index: 0 });
+  }
+
+  function updateSourceHtml(nextHtml: string) {
+    setSourceHtml(nextHtml);
+    postHostDocumentChange(nextHtml, "source");
   }
 
   function postCommand(command: string, payload: Record<string, unknown> = {}) {
@@ -252,6 +291,7 @@ export default function App() {
     pendingScrollRef.current = { ...lastScrollRef.current };
     setSourceHtml(html);
     renderHtml(html);
+    postHostDocumentChange(html, "history", true);
   }
 
   function toggleTrustedScripts(enabled: boolean) {
@@ -260,6 +300,11 @@ export default function App() {
   }
 
   async function openFile() {
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "openFile" });
+      return;
+    }
+
     const picker = (window as any).showOpenFilePicker;
     if (picker) {
       try {
@@ -300,6 +345,11 @@ export default function App() {
 
   async function saveToFile() {
     const clean = cleanEditorHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "save", html: clean });
+      return;
+    }
+
     const picker = (window as any).showSaveFilePicker;
     if (picker) {
       try {
@@ -327,12 +377,23 @@ export default function App() {
 
   async function copyHtml() {
     const clean = cleanEditorHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "copy", html: clean });
+      return;
+    }
+
     await navigator.clipboard.writeText(clean);
     showToast("HTML copied to clipboard");
   }
 
   function downloadHtml() {
-    downloadCleanHtml(cleanEditorHtml(sourceHtmlRef.current));
+    const clean = cleanEditorHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "download", html: clean });
+      return;
+    }
+
+    downloadCleanHtml(clean);
     showToast("Downloaded HTML copy");
   }
 
@@ -387,6 +448,7 @@ export default function App() {
         setSourceHtml(clean);
         setAppliedHtml(clean);
         scheduleHistory(clean);
+        postHostDocumentChange(clean, data.reason);
       }
     }
 
@@ -396,6 +458,31 @@ export default function App() {
       if (pendingHistoryTimer.current) window.clearTimeout(pendingHistoryTimer.current);
     };
   }, [mode]);
+
+  useEffect(() => {
+    if (!vscodeApi) return;
+
+    function onVsCodeMessage(event: MessageEvent) {
+      if (!isVsCodeHostMessage(event.data)) return;
+      const data = event.data;
+
+      if (data.type === "cosmicCanvas.document") {
+        loadHostDocument(data.html);
+      }
+
+      if (data.type === "cosmicCanvas.toast") {
+        showToast(data.message);
+      }
+    }
+
+    window.addEventListener("message", onVsCodeMessage);
+    vscodeApi.postMessage({ type: "ready" });
+
+    return () => {
+      window.removeEventListener("message", onVsCodeMessage);
+      if (pendingHostChangeTimer.current) window.clearTimeout(pendingHostChangeTimer.current);
+    };
+  }, [vscodeApi]);
 
   // Keyboard shortcuts handled at the app-shell level (focus outside the iframe).
   useEffect(() => {
@@ -444,6 +531,7 @@ export default function App() {
 
   // Autosave a recovery draft once the document differs from the starting sample.
   useEffect(() => {
+    if (isVsCode) return;
     if (sourceHtml === initialHtml) return;
     const id = window.setTimeout(() => {
       try {
@@ -458,6 +546,7 @@ export default function App() {
   useEffect(() => {
     if (didLoadUrlRef.current) return;
     didLoadUrlRef.current = true;
+    if (isVsCode) return;
 
     const params = new URLSearchParams(window.location.search);
     const loadUrl = params.get("load");
@@ -485,9 +574,11 @@ export default function App() {
     }
   }, []);
 
-  const saveTitle = supportsFileSystemAccess
-    ? "Save to file (Ctrl+S)"
-    : "Download a copy (Ctrl+S)";
+  const saveTitle = isVsCode
+    ? "Save the VS Code document (Ctrl+S)"
+    : supportsFileSystemAccess
+      ? "Save to file (Ctrl+S)"
+      : "Download a copy (Ctrl+S)";
 
   return (
     <main className="app-shell">
@@ -536,7 +627,7 @@ export default function App() {
       <section className={`workspace ${sourceVisible ? "" : "source-hidden"}`}>
         <SourcePane
           value={sourceHtml}
-          onChange={setSourceHtml}
+          onChange={updateSourceHtml}
           visible={sourceVisible}
           onShow={() => setSourceVisible(true)}
           dirty={sourceDirty}
@@ -558,7 +649,11 @@ export default function App() {
           <div className={`preview-frame preview-frame-${viewport}`}>
             <iframe
               ref={iframeRef}
-              sandbox="allow-scripts allow-same-origin allow-downloads"
+              sandbox={
+                isVsCode
+                  ? "allow-scripts allow-downloads"
+                  : "allow-scripts allow-same-origin allow-downloads"
+              }
               srcDoc={frameHtml}
               title="Editable HTML preview"
             />

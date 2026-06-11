@@ -1,12 +1,67 @@
 {
   "name": "cosmic-canvas",
+  "displayName": "Cosmic Canvas",
+  "description": "A WYSIWYG custom editor for polishing HTML documents.",
   "version": "0.1.0",
+  "publisher": "local",
   "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gustavorubim/cosmic-canvas.git"
+  },
   "type": "module",
+  "main": "./out/extension.cjs",
+  "icon": "public/app-icon-space-192.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCustomEditor:cosmicCanvas.htmlEditor",
+    "onCommand:cosmicCanvas.openAsEditor"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "cosmicCanvas.openAsEditor",
+        "title": "Cosmic Canvas: Open Current HTML File"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "cosmicCanvas.htmlEditor",
+        "displayName": "Cosmic Canvas",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "cosmicCanvas.openAsEditor",
+          "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "vscode:compile": "tsc -p tsconfig.extension.json",
+    "vscode:prune": "node scripts/prune-vscode-dist.mjs",
+    "vscode:prepublish": "npm run build && npm run vscode:prune && npm run vscode:compile",
+    "vsix": "npm run vscode:prepublish && vsce package --no-dependencies",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,9 +79,12 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/vscode": "^1.90.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "@vscode/vsce": "^3.2.1",
     "jsdom": "^25.0.1",
     "typescript": "^5.6.2",
     "vite": "^6.0.0",

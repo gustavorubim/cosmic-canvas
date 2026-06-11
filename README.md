@@ -185,6 +185,23 @@ npm run build
 
 The static production build is written to `dist/`.
 
+## VS Code Extension
+
+Cosmic Canvas can also run as a VS Code custom editor for `.html` and `.htm` files.
+
+```powershell
+npm run vsix
+```
+
+The packaged extension is written to `cosmic-canvas-0.1.0.vsix`. Install it with:
+
+```powershell
+code --install-extension .\cosmic-canvas-0.1.0.vsix
+```
+
+After installation, open an HTML file with **Open With... > Cosmic Canvas** or run
+**Cosmic Canvas: Open Current HTML File** from the command palette.
+
 ## Tests
 
 ```powershell

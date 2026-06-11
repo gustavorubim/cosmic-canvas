@@ -38,7 +38,7 @@ export function Topbar({
     <header className="topbar">
       <div className="brand">
         <div className="brand-mark">
-          <img alt="" src="/app-icon-space-192.png" />
+          <img alt="" src="app-icon-space-192.png" />
         </div>
         <h1>Cosmic Canvas</h1>
       </div>
