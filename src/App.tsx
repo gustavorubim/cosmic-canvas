@@ -2,7 +2,6 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  Code2,
   Copy,
   CopyPlus,
   Download,
@@ -12,6 +11,8 @@ import {
   Monitor,
   MousePointer2,
   Move,
+  PanelLeftClose,
+  PanelLeftOpen,
   Redo2,
   RefreshCcw,
   Smartphone,
@@ -83,7 +84,7 @@ const alignButtons = [
 
 function fileNameFromDate() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `edited-html-${stamp}.html`;
+  return `cosmic-canvas-${stamp}.html`;
 }
 
 function numberFromCss(value: string, fallback = "") {
@@ -108,6 +109,7 @@ export default function App() {
   const [mode, setMode] = useState<EditorMode>("text");
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [runTrustedScripts, setRunTrustedScripts] = useState(false);
+  const [sourceVisible, setSourceVisible] = useState(true);
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({
     state: "loading",
     title: "",
@@ -277,11 +279,11 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
-            <Code2 size={22} aria-hidden="true" />
+            <img alt="" src="/app-icon-space-192.png" />
           </div>
           <div>
-            <h1>WYSIWYG HTML Editor</h1>
-            <p>Paste, touch up, export.</p>
+            <h1>Cosmic Canvas</h1>
+            <p>Launch HTML from rough draft to polished page.</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -330,6 +332,21 @@ export default function App() {
 
         <div className="toolbar-spacer" />
 
+        <button
+          aria-pressed={sourceVisible}
+          className="toolbar-button"
+          onClick={() => setSourceVisible((current) => !current)}
+          title={sourceVisible ? "Hide HTML source" : "Show HTML source"}
+          type="button"
+        >
+          {sourceVisible ? (
+            <PanelLeftClose size={16} aria-hidden="true" />
+          ) : (
+            <PanelLeftOpen size={16} aria-hidden="true" />
+          )}
+          Source
+        </button>
+
         <label
           className="script-toggle"
           title="Run pasted scripts and inline handlers in the preview. Use only for HTML you trust."
@@ -369,27 +386,29 @@ export default function App() {
         </div>
       </section>
 
-      <section className="workspace">
-        <aside className="source-pane" aria-label="HTML source">
-          <div className="pane-title">
-            <span>HTML source</span>
-            <span>{sourceHtml.length.toLocaleString()} chars</span>
-          </div>
-          <textarea
-            aria-label="HTML source editor"
-            spellCheck={false}
-            value={sourceHtml}
-            onChange={(event) => setSourceHtml(event.target.value)}
-          />
-        </aside>
+      <section className={`workspace ${sourceVisible ? "" : "source-hidden"}`}>
+        {sourceVisible ? (
+          <aside className="source-pane" aria-label="HTML source">
+            <div className="pane-title">
+              <span>HTML source</span>
+              <span>{sourceHtml.length.toLocaleString()} chars</span>
+            </div>
+            <textarea
+              aria-label="HTML source editor"
+              spellCheck={false}
+              value={sourceHtml}
+              onChange={(event) => setSourceHtml(event.target.value)}
+            />
+          </aside>
+        ) : null}
 
         <section className="preview-pane" aria-label="Rendered HTML">
           <div className="pane-title">
             <span>Rendered page</span>
             <span title={previewStatus.bodyTextStart || undefined}>
               {previewStatus.state === "ready"
-                ? `${viewportLabels[viewport]} · ${previewStatus.title || "Ready"}`
-                : `${viewportLabels[viewport]} · Loading`}
+                ? `${viewportLabels[viewport]} - ${previewStatus.title || "Ready"}`
+                : `${viewportLabels[viewport]} - Loading`}
             </span>
           </div>
           <div className={`preview-frame preview-frame-${viewport}`}>

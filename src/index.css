@@ -70,6 +70,12 @@ button:disabled {
   background: #eef8f6;
 }
 
+.brand-mark img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
 .brand h1 {
   margin: 0;
   font-size: 20px;
@@ -104,6 +110,7 @@ button:disabled {
 }
 
 .button,
+.toolbar-button,
 .segmented button,
 .icon-group button,
 .align-row button,
@@ -123,6 +130,22 @@ button:disabled {
   gap: 8px;
   padding: 0 12px;
   font-weight: 650;
+}
+
+.toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.toolbar-button[aria-pressed="true"] {
+  border-color: #0f766e;
+  color: #0f766e;
+  background: #eef8f6;
 }
 
 .button.primary {
@@ -209,6 +232,10 @@ button:disabled {
   grid-template-columns: minmax(280px, 0.9fr) minmax(440px, 1.45fr) minmax(260px, 0.75fr);
   gap: 14px;
   padding: 14px;
+}
+
+.workspace.source-hidden {
+  grid-template-columns: minmax(520px, 1.8fr) minmax(260px, 0.7fr);
 }
 
 .source-pane,
@@ -398,6 +425,11 @@ button:disabled {
     grid-template-columns: 1fr;
     grid-template-rows: 380px 620px 520px;
   }
+
+  .workspace.source-hidden {
+    grid-template-columns: 1fr;
+    grid-template-rows: 620px 520px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -421,6 +453,10 @@ button:disabled {
   }
 
   .script-toggle {
+    width: 100%;
+  }
+
+  .toolbar-button {
     width: 100%;
   }
 
