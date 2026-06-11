@@ -267,9 +267,32 @@ const EDITOR_SCRIPT = String.raw`
   }
 
   function publishChange(reason = "edit") {
-    post("wysiwyg-document-change", { reason, html: serialize() });
+    post("wysiwyg-document-change", {
+      reason,
+      html: serialize(),
+      scrollX: window.scrollX,
+      scrollY: window.scrollY
+    });
     publishSelected();
     scheduleDeckPublish();
+  }
+
+  function elementLabel(element) {
+    const tag = element.tagName.toLowerCase();
+    if (element.id) return tag + "#" + element.id;
+    const firstClass = element.classList[0];
+    return firstClass ? tag + "." + firstClass : tag;
+  }
+
+  function breadcrumb(element) {
+    const trail = [];
+    let node = element;
+    while (node && node !== document.documentElement) {
+      if (node.dataset && node.dataset.wysiwygEditor === "true") break;
+      trail.unshift({ id: ensureId(node), label: elementLabel(node) });
+      node = node.parentElement;
+    }
+    return trail;
   }
 
   function publishSelected() {
@@ -280,12 +303,18 @@ const EDITOR_SCRIPT = String.raw`
 
     const styles = getComputedStyle(selectedElement);
     const rect = selectedElement.getBoundingClientRect();
+    const isImage = selectedElement.tagName.toLowerCase() === "img";
     post("wysiwyg-selection", {
       selected: {
         id: ensureId(selectedElement),
         tagName: selectedElement.tagName.toLowerCase(),
         text: selectedElement.textContent || "",
         childElementCount: selectedElement.childElementCount,
+        editableText: selectedElement.childElementCount === 0,
+        classes: Array.from(selectedElement.classList),
+        ancestors: breadcrumb(selectedElement),
+        isImage,
+        imageSrc: isImage ? (selectedElement.getAttribute("src") || "") : "",
         styles: {
           color: colorToHex(styles.color),
           backgroundColor: colorToHex(styles.backgroundColor),
@@ -389,6 +418,31 @@ const EDITOR_SCRIPT = String.raw`
     publishChange("text");
   }
 
+  function selectParent() {
+    if (!selectedElement) return;
+    const parent = selectedElement.parentElement;
+    const target = pickElement(parent);
+    if (!target || target === selectedElement) return;
+    selectElement(target);
+  }
+
+  function setClass(name, action) {
+    if (!selectedElement || !name) return;
+    const className = String(name).trim();
+    if (!className) return;
+    if (action === "add") selectedElement.classList.add(className);
+    else if (action === "remove") selectedElement.classList.remove(className);
+    else selectedElement.classList.toggle(className);
+    publishChange("class");
+  }
+
+  function replaceImage(src, alt) {
+    if (!selectedElement || selectedElement.tagName.toLowerCase() !== "img") return;
+    if (typeof src === "string" && src) selectedElement.setAttribute("src", src);
+    if (typeof alt === "string") selectedElement.setAttribute("alt", alt);
+    publishChange("image");
+  }
+
   function duplicateSelected() {
     if (!selectedElement || !selectedElement.parentElement || selectedElement === document.body) return;
     const clone = selectedElement.cloneNode(true);
@@ -408,10 +462,32 @@ const EDITOR_SCRIPT = String.raw`
     publishChange("delete");
   }
 
+  function baseTransform(element) {
+    if (element.dataset.wysiwygBaseTransform === undefined) {
+      element.dataset.wysiwygBaseTransform = element.style.transform || "";
+    }
+    return element.dataset.wysiwygBaseTransform;
+  }
+
+  function currentTranslate(element) {
+    return {
+      dx: Number(element.dataset.wysiwygTx || 0),
+      dy: Number(element.dataset.wysiwygTy || 0)
+    };
+  }
+
+  function setTranslate(element, dx, dy) {
+    const base = baseTransform(element);
+    element.dataset.wysiwygTx = String(dx);
+    element.dataset.wysiwygTy = String(dy);
+    const next = ("translate(" + dx + "px, " + dy + "px) " + base).trim();
+    element.style.transform = next;
+  }
+
   function nudge(dx, dy) {
     if (!selectedElement) return;
-    const existing = selectedElement.style.transform || "";
-    selectedElement.style.transform = ("translate(" + dx + "px, " + dy + "px) " + existing).trim();
+    const current = currentTranslate(selectedElement);
+    setTranslate(selectedElement, current.dx + dx, current.dy + dy);
     publishChange("move");
   }
 
@@ -598,11 +674,13 @@ const EDITOR_SCRIPT = String.raw`
     event.preventDefault();
     event.stopPropagation();
     selectElement(target);
+    const origin = currentTranslate(target);
     dragState = {
       element: target,
       startX: event.clientX,
       startY: event.clientY,
-      transform: target.style.transform || ""
+      baseDx: origin.dx,
+      baseDy: origin.dy
     };
     target.setPointerCapture?.(event.pointerId);
   }, true);
@@ -612,7 +690,7 @@ const EDITOR_SCRIPT = String.raw`
     event.preventDefault();
     const dx = Math.round(event.clientX - dragState.startX);
     const dy = Math.round(event.clientY - dragState.startY);
-    dragState.element.style.transform = ("translate(" + dx + "px, " + dy + "px) " + dragState.transform).trim();
+    setTranslate(dragState.element, dragState.baseDx + dx, dragState.baseDy + dy);
     publishSelected();
   }, true);
 
@@ -638,7 +716,33 @@ const EDITOR_SCRIPT = String.raw`
 
   document.addEventListener("blur", () => publishChange("blur"), true);
 
+  document.addEventListener("keydown", (event) => {
+    if (mode === "preview" || !selectedElement) return;
+    const active = document.activeElement;
+    const editing = active && active.getAttribute && active.getAttribute("contenteditable") === "true";
+    if (editing) return;
+
+    if (event.key === "Escape") {
+      clearSelection();
+      return;
+    }
+    if (event.key === "Delete") {
+      event.preventDefault();
+      deleteSelected();
+      return;
+    }
+    if (event.key.indexOf("Arrow") === 0) {
+      const step = event.shiftKey ? 1 : 8;
+      const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+      const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+      if (dx === 0 && dy === 0) return;
+      event.preventDefault();
+      nudge(dx, dy);
+    }
+  }, true);
+
   window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
     const data = event.data || {};
     if (data.type !== "wysiwyg-command") return;
 
@@ -654,8 +758,11 @@ const EDITOR_SCRIPT = String.raw`
       if (element) selectElement(element);
     }
 
+    if (data.command === "select-parent") selectParent();
     if (data.command === "apply-style") applyStyles(data.styles);
     if (data.command === "set-text") setText(data.text || "");
+    if (data.command === "set-class") setClass(data.className, data.action);
+    if (data.command === "replace-image") replaceImage(data.src, data.alt);
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);
@@ -663,6 +770,7 @@ const EDITOR_SCRIPT = String.raw`
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);
     if (data.command === "nudge") nudge(Number(data.dx || 0), Number(data.dy || 0));
+    if (data.command === "scroll-to") window.scrollTo(Number(data.x || 0), Number(data.y || 0));
     if (data.command === "request-html") publishChange("request");
   });
 
@@ -780,6 +888,92 @@ function removeEditorArtifacts(doc: Document) {
   });
 }
 
+/**
+ * Final safety net: strip any remaining editor-only `data-wysiwyg-*` attributes
+ * (selection ids, drag transform bookkeeping, etc.). Runs after the dedicated
+ * restore passes have already consumed the attributes they need.
+ */
+function sweepEditorAttributes(doc: Document) {
+  doc.querySelectorAll("*").forEach((element) => {
+    Array.from(element.attributes).forEach((attribute) => {
+      if (attribute.name.startsWith("data-wysiwyg-")) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+}
+
+const RAW_TEXT_TAGS = new Set(["pre", "script", "style", "textarea"]);
+const VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
+const INLINE_TAGS = new Set([
+  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em",
+  "i", "img", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small",
+  "span", "strong", "sub", "sup", "time", "u", "var", "wbr", "button", "input",
+  "label", "select", "textarea",
+]);
+
+function openTagOf(element: Element): string {
+  const clone = element.cloneNode(false) as Element;
+  const html = clone.outerHTML;
+  const tag = element.tagName.toLowerCase();
+  if (VOID_TAGS.has(tag)) return html;
+  const suffix = `</${tag}>`;
+  return html.endsWith(suffix) ? html.slice(0, -suffix.length) : html;
+}
+
+/**
+ * Block-format an element only when it is a pure structural container (element
+ * children, no significant inline text, no inline-level children). Text-bearing
+ * and inline elements are emitted verbatim so whitespace-sensitive content is
+ * never reflowed.
+ */
+function shouldBlockFormat(element: Element): boolean {
+  const tag = element.tagName.toLowerCase();
+  if (RAW_TEXT_TAGS.has(tag) || INLINE_TAGS.has(tag) || VOID_TAGS.has(tag)) return false;
+  if (element.children.length === 0) return false;
+  const hasSignificantText = Array.from(element.childNodes).some(
+    (node) => node.nodeType === 3 && (node.textContent || "").trim() !== "",
+  );
+  if (hasSignificantText) return false;
+  return Array.from(element.children).every(
+    (child) => !INLINE_TAGS.has(child.tagName.toLowerCase()),
+  );
+}
+
+function prettyElement(element: Element, depth: number, lines: string[]) {
+  const pad = "  ".repeat(depth);
+  const tag = element.tagName.toLowerCase();
+
+  if (VOID_TAGS.has(tag)) {
+    lines.push(pad + openTagOf(element));
+    return;
+  }
+
+  if (!shouldBlockFormat(element)) {
+    element.outerHTML.split("\n").forEach((line) => lines.push(pad + line));
+    return;
+  }
+
+  lines.push(pad + openTagOf(element));
+  element.childNodes.forEach((node) => {
+    if (node.nodeType === 1) {
+      prettyElement(node as Element, depth + 1, lines);
+    } else if (node.nodeType === 8) {
+      lines.push("  ".repeat(depth + 1) + `<!--${(node as Comment).data}-->`);
+    }
+  });
+  lines.push(pad + `</${tag}>`);
+}
+
+function prettyPrintDocument(doc: Document): string {
+  const lines: string[] = [];
+  prettyElement(doc.documentElement, 0, lines);
+  return `<!doctype html>\n${lines.join("\n")}\n`;
+}
+
 function editorStyleTag() {
   return `<style data-wysiwyg-editor="true">${EDITOR_STYLE}</style>`;
 }
@@ -808,12 +1002,20 @@ function injectEditorBridge(html: string): string {
   return nextHtml;
 }
 
-export function cleanEditorHtml(html: string): string {
+export type CleanOptions = {
+  /** Re-indent structural markup for readability. Off by default — it may adjust
+   *  insignificant whitespace between block elements. */
+  pretty?: boolean;
+};
+
+export function cleanEditorHtml(html: string, options: CleanOptions = {}): string {
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
   removeEditorArtifacts(doc);
   restoreUserScripts(doc);
   restoreInlineHandlers(doc);
+  sweepEditorAttributes(doc);
+  if (options.pretty) return prettyPrintDocument(doc);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 

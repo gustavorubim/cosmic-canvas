@@ -1,55 +1,24 @@
-import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  CopyPlus,
-  Download,
-  Eye,
-  FileCode2,
-  Film,
-  Layers3,
-  Monitor,
-  MousePointer2,
-  Move,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  Redo2,
-  RefreshCcw,
-  Smartphone,
-  Tablet,
-  Table2,
-  Trash2,
-  Type,
-  Undo2,
-} from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DataPanel } from "./components/DataPanel";
+import { DeckTimeline } from "./components/DeckTimeline";
+import { Inspector, InspectorEmpty } from "./components/Inspector";
+import { SourcePane } from "./components/SourcePane";
+import { Toolbar } from "./components/Toolbar";
+import { Topbar } from "./components/Topbar";
+import {
+  DEFAULT_DATA_ROWS,
+  normalizeDataRows,
+  parseDataText,
+  serializeDataRows,
+} from "./csv";
 import { cleanEditorHtml, normalizeHtmlInput, prepareEditableHtml, SAMPLE_HTML } from "./htmlDocument";
-
-type EditorMode = "text" | "select" | "move" | "preview";
-type Viewport = "desktop" | "tablet" | "mobile";
-
-type SelectedElement = {
-  id: string;
-  tagName: string;
-  text: string;
-  childElementCount: number;
-  styles: {
-    color: string;
-    backgroundColor: string;
-    fontSize: string;
-    fontWeight: string;
-    textAlign: string;
-    padding: string;
-    margin: string;
-    width: string;
-    height: string;
-    borderRadius: string;
-  };
-};
+import {
+  type DeckSlide,
+  type EditorMode,
+  isBridgeMessage,
+  type SelectedElement,
+  type Viewport,
+} from "./protocol";
 
 type HistoryState = {
   stack: string[];
@@ -62,21 +31,9 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type DeckSlide = {
-  id: string;
-  index: number;
-  title: string;
-  section: string;
-};
-
 type SidePanel = "inspect" | "data";
 
-const DEFAULT_DATA_ROWS = [
-  ["Metric", "Value", "Change"],
-  ["Revenue", "$4.2M", "+18%"],
-  ["Retention", "91%", "+6 pts"],
-  ["Pipeline", "$12.4M", "+22%"],
-];
+const DRAFT_KEY = "cosmic-canvas-draft";
 
 const viewportLabels: Record<Viewport, string> = {
   desktop: "Desktop",
@@ -84,94 +41,12 @@ const viewportLabels: Record<Viewport, string> = {
   mobile: "Mobile",
 };
 
-const modeButtons: Array<{ mode: EditorMode; label: string; icon: typeof Type }> = [
-  { mode: "text", label: "Text", icon: Type },
-  { mode: "select", label: "Select", icon: MousePointer2 },
-  { mode: "move", label: "Move", icon: Move },
-  { mode: "preview", label: "Preview", icon: Eye },
-];
-
-const viewportButtons: Array<{ viewport: Viewport; icon: typeof Monitor }> = [
-  { viewport: "desktop", icon: Monitor },
-  { viewport: "tablet", icon: Tablet },
-  { viewport: "mobile", icon: Smartphone },
-];
-
-const alignButtons = [
-  { label: "Left", value: "left", icon: AlignLeft },
-  { label: "Center", value: "center", icon: AlignCenter },
-  { label: "Right", value: "right", icon: AlignRight },
-];
+const supportsFileSystemAccess =
+  typeof window !== "undefined" && typeof (window as any).showSaveFilePicker === "function";
 
 function fileNameFromDate() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `cosmic-canvas-${stamp}.html`;
-}
-
-function numberFromCss(value: string, fallback = "") {
-  const match = value.match(/-?\d+(\.\d+)?/);
-  return match ? match[0] : fallback;
-}
-
-function fallbackColor(value: string, fallback: string) {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
-}
-
-function normalizeDataRows(rows: string[][]) {
-  const nonEmptyRows = rows.filter((row) => row.some((cell) => cell.trim() !== ""));
-  const sourceRows = nonEmptyRows.length ? nonEmptyRows : DEFAULT_DATA_ROWS;
-  const width = Math.max(2, ...sourceRows.map((row) => row.length));
-  return sourceRows.map((row) =>
-    Array.from({ length: width }, (_, index) => row[index] ?? ""),
-  );
-}
-
-function parseDataText(text: string) {
-  const delimiter = text.includes("\t") ? "\t" : ",";
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (char === '"' && quoted && next === '"') {
-      cell += '"';
-      index += 1;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === delimiter && !quoted) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !quoted) {
-      row.push(cell.trim());
-      rows.push(row);
-      row = [];
-      cell = "";
-      if (char === "\r" && next === "\n") index += 1;
-    } else {
-      cell += char;
-    }
-  }
-
-  row.push(cell.trim());
-  rows.push(row);
-  return normalizeDataRows(rows);
-}
-
-function serializeDataRows(rows: string[][]) {
-  return rows
-    .map((row) =>
-      row
-        .map((cell) => {
-          if (!/[",\n\r]/.test(cell)) return cell;
-          return `"${cell.replace(/"/g, '""')}"`;
-        })
-        .join(","),
-    )
-    .join("\n");
 }
 
 export default function App() {
@@ -181,6 +56,11 @@ export default function App() {
   const didLoadUrlRef = useRef(false);
   const historyRef = useRef<HistoryState>({ stack: [initialHtml], index: 0 });
   const pendingHistoryTimer = useRef<number>();
+  const fileHandleRef = useRef<any>(null);
+  const sourceHtmlRef = useRef(initialHtml);
+  const lastScrollRef = useRef({ x: 0, y: 0 });
+  const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
+
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
   const [frameHtml, setFrameHtml] = useState(() => prepareEditableHtml(initialHtml));
   const [selected, setSelected] = useState<SelectedElement | null>(null);
@@ -200,6 +80,9 @@ export default function App() {
   });
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [clipboardState, setClipboardState] = useState("Copy");
+  const [saveLabel, setSaveLabel] = useState("Save");
+
+  sourceHtmlRef.current = sourceHtml;
 
   const canUndo = historyState.index > 0;
   const canRedo = historyState.index < historyState.stack.length - 1;
@@ -249,11 +132,7 @@ export default function App() {
 
   function postCommand(command: string, payload: Record<string, unknown> = {}) {
     iframeRef.current?.contentWindow?.postMessage(
-      {
-        type: "wysiwyg-command",
-        command,
-        ...payload,
-      },
+      { type: "wysiwyg-command", command, ...payload },
       "*",
     );
   }
@@ -334,6 +213,7 @@ export default function App() {
     if (nextIndex < 0 || nextIndex >= current.stack.length) return;
     const html = current.stack[nextIndex];
     syncHistoryState({ stack: current.stack, index: nextIndex });
+    pendingScrollRef.current = { ...lastScrollRef.current };
     setSourceHtml(html);
     renderHtml(html);
   }
@@ -343,23 +223,39 @@ export default function App() {
     renderHtml(sourceHtml, enabled);
   }
 
+  async function openFile() {
+    const picker = (window as any).showOpenFilePicker;
+    if (picker) {
+      try {
+        const [handle] = await picker({
+          types: [{ description: "HTML", accept: { "text/html": [".html", ".htm"] } }],
+        });
+        fileHandleRef.current = handle;
+        const file = await handle.getFile();
+        loadHtml(await file.text());
+        return;
+      } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError") return;
+        // Fall back to the hidden file input below.
+      }
+    }
+    fileInputRef.current?.click();
+  }
+
   async function openHtmlFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    loadHtml(text);
+    fileHandleRef.current = null;
+    loadHtml(await file.text());
     event.currentTarget.value = "";
   }
 
-  async function copyHtml() {
-    const clean = cleanEditorHtml(sourceHtml);
-    await navigator.clipboard.writeText(clean);
-    setClipboardState("Copied");
-    window.setTimeout(() => setClipboardState("Copy"), 1300);
+  function flashSave() {
+    setSaveLabel("Saved");
+    window.setTimeout(() => setSaveLabel("Save"), 1300);
   }
 
-  function downloadHtml() {
-    const clean = cleanEditorHtml(sourceHtml);
+  function downloadCleanHtml(clean: string) {
     const blob = new Blob([clean], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -369,16 +265,57 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function saveToFile() {
+    const clean = cleanEditorHtml(sourceHtmlRef.current);
+    const picker = (window as any).showSaveFilePicker;
+    if (picker) {
+      try {
+        let handle = fileHandleRef.current;
+        if (!handle) {
+          handle = await picker({
+            suggestedName: fileNameFromDate(),
+            types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
+          });
+          fileHandleRef.current = handle;
+        }
+        const writable = await handle.createWritable();
+        await writable.write(clean);
+        await writable.close();
+        flashSave();
+        return;
+      } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError") return;
+        console.error(error);
+      }
+    }
+    downloadCleanHtml(clean);
+    flashSave();
+  }
+
+  async function copyHtml() {
+    const clean = cleanEditorHtml(sourceHtmlRef.current);
+    await navigator.clipboard.writeText(clean);
+    setClipboardState("Copied");
+    window.setTimeout(() => setClipboardState("Copy"), 1300);
+  }
+
+  function downloadHtml() {
+    downloadCleanHtml(cleanEditorHtml(sourceHtmlRef.current));
+  }
+
   useEffect(() => {
     function onMessage(event: MessageEvent) {
-      const data = event.data || {};
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (!isBridgeMessage(event.data)) return;
+      const data = event.data;
+
       if (data.type === "wysiwyg-ready") {
-        setPreviewStatus({
-          state: "ready",
-          title: typeof data.title === "string" ? data.title : "",
-          bodyTextStart: typeof data.bodyTextStart === "string" ? data.bodyTextStart : "",
-        });
+        setPreviewStatus({ state: "ready", title: data.title, bodyTextStart: data.bodyTextStart });
         postCommand("set-mode", { mode });
+        if (pendingScrollRef.current) {
+          postCommand("scroll-to", pendingScrollRef.current);
+          pendingScrollRef.current = null;
+        }
       }
 
       if (data.type === "wysiwyg-selection") {
@@ -386,11 +323,12 @@ export default function App() {
       }
 
       if (data.type === "wysiwyg-deck") {
-        setDeckSlides(Array.isArray(data.slides) ? data.slides : []);
-        setActiveSlideId(typeof data.activeId === "string" ? data.activeId : "");
+        setDeckSlides(data.slides);
+        setActiveSlideId(data.activeId);
       }
 
-      if (data.type === "wysiwyg-document-change" && typeof data.html === "string") {
+      if (data.type === "wysiwyg-document-change") {
+        lastScrollRef.current = { x: data.scrollX, y: data.scrollY };
         const clean = cleanEditorHtml(data.html);
         setSourceHtml(clean);
         scheduleHistory(clean);
@@ -404,179 +342,126 @@ export default function App() {
     };
   }, [mode]);
 
+  // Keyboard shortcuts handled at the app-shell level (focus outside the iframe).
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const mod = event.ctrlKey || event.metaKey;
+      if (!mod) return;
+      const key = event.key.toLowerCase();
+
+      if (key === "s") {
+        event.preventDefault();
+        void saveToFile();
+        return;
+      }
+
+      const target = event.target;
+      const inField =
+        target instanceof HTMLElement && target.closest("input, textarea, .cm-editor");
+      if (inField) return;
+
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        stepHistory(-1);
+      } else if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        stepHistory(1);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Autosave a recovery draft once the document differs from the starting sample.
+  useEffect(() => {
+    if (sourceHtml === initialHtml) return;
+    const id = window.setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ html: sourceHtml, savedAt: Date.now() }));
+      } catch {
+        // Storage may be unavailable (private mode / quota); drafts are best-effort.
+      }
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [sourceHtml, initialHtml]);
+
   useEffect(() => {
     if (didLoadUrlRef.current) return;
     didLoadUrlRef.current = true;
 
     const params = new URLSearchParams(window.location.search);
     const loadUrl = params.get("load");
-    if (!loadUrl) return;
+    if (loadUrl) {
+      const trusted = params.get("trusted") === "1";
+      setRunTrustedScripts(trusted);
+      fetch(loadUrl)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
+          return response.text();
+        })
+        .then((html) => loadHtml(html, true, trusted))
+        .catch((error: unknown) => console.error(error));
+      return;
+    }
 
-    const trusted = params.get("trusted") === "1";
-    setRunTrustedScripts(trusted);
-
-    fetch(loadUrl)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
-        return response.text();
-      })
-      .then((html) => loadHtml(html, true, trusted))
-      .catch((error: unknown) => {
-        console.error(error);
-      });
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { html?: string; savedAt?: number };
+      if (typeof draft.html !== "string" || !draft.html.trim()) return;
+      const when = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "your last session";
+      if (window.confirm(`Restore your unsaved draft from ${when}?`)) {
+        loadHtml(draft.html);
+      }
+    } catch {
+      // Ignore malformed drafts.
+    }
   }, []);
+
+  const saveTitle = supportsFileSystemAccess
+    ? "Save to file (Ctrl+S)"
+    : "Download a copy (Ctrl+S)";
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">
-            <img alt="" src="/app-icon-space-192.png" />
-          </div>
-          <div>
-            <h1>Cosmic Canvas</h1>
-            <p>Launch HTML from rough draft to polished page.</p>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <input
-            ref={fileInputRef}
-            accept=".html,.htm,text/html"
-            className="file-input"
-            onChange={openHtmlFile}
-            type="file"
-          />
-          <button className="button secondary" type="button" onClick={() => fileInputRef.current?.click()}>
-            <FileCode2 size={17} aria-hidden="true" />
-            Open file
-          </button>
-          <button className="button secondary" type="button" onClick={() => loadHtml(sourceHtml)}>
-            <RefreshCcw size={17} aria-hidden="true" />
-            Apply source
-          </button>
-          <button className="button" type="button" onClick={copyHtml}>
-            <Copy size={17} aria-hidden="true" />
-            {clipboardState}
-          </button>
-          <button className="button primary" type="button" onClick={downloadHtml}>
-            <Download size={17} aria-hidden="true" />
-            Download
-          </button>
-        </div>
-      </header>
+      <Topbar
+        fileInputRef={fileInputRef}
+        onOpen={openFile}
+        onOpenFile={openHtmlFile}
+        onApplySource={() => loadHtml(sourceHtml)}
+        onSave={saveToFile}
+        saveLabel={saveLabel}
+        saveTitle={saveTitle}
+        onCopy={copyHtml}
+        copyLabel={clipboardState}
+        onDownload={downloadHtml}
+      />
 
-      <section className="toolbar" aria-label="Editor toolbar">
-        <div className="segmented" aria-label="Edit mode">
-          {modeButtons.map(({ mode: buttonMode, label, icon: Icon }) => (
-            <button
-              aria-pressed={mode === buttonMode}
-              className={mode === buttonMode ? "is-active" : ""}
-              key={buttonMode}
-              onClick={() => setEditorMode(buttonMode)}
-              title={`${label} mode`}
-              type="button"
-            >
-              <Icon size={16} aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="toolbar-spacer" />
-
-        <button
-          aria-pressed={sourceVisible}
-          className="toolbar-button"
-          onClick={() => setSourceVisible((current) => !current)}
-          title={sourceVisible ? "Hide HTML source" : "Show HTML source"}
-          type="button"
-        >
-          {sourceVisible ? (
-            <PanelLeftClose size={16} aria-hidden="true" />
-          ) : (
-            <PanelLeftOpen size={16} aria-hidden="true" />
-          )}
-          Source
-        </button>
-
-        <button
-          aria-pressed={sidePanel === "data"}
-          className="toolbar-button"
-          onClick={() => setSidePanel((current) => (current === "data" ? "inspect" : "data"))}
-          title="Open data editor"
-          type="button"
-        >
-          <Table2 size={16} aria-hidden="true" />
-          Data
-        </button>
-
-        <label
-          className="script-toggle"
-          title="Run pasted scripts and inline handlers in the preview. Use only for HTML you trust."
-        >
-          <input
-            checked={runTrustedScripts}
-            onChange={(event) => toggleTrustedScripts(event.target.checked)}
-            type="checkbox"
-          />
-          <Film size={16} aria-hidden="true" />
-          Trusted scripts
-        </label>
-
-        <div className="icon-group" aria-label="History">
-          <button disabled={!canUndo} onClick={() => stepHistory(-1)} title="Undo" type="button">
-            <Undo2 size={17} aria-hidden="true" />
-          </button>
-          <button disabled={!canRedo} onClick={() => stepHistory(1)} title="Redo" type="button">
-            <Redo2 size={17} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="icon-group" aria-label="Viewport">
-          {viewportButtons.map(({ viewport: buttonViewport, icon: Icon }) => (
-            <button
-              aria-label={viewportLabels[buttonViewport]}
-              aria-pressed={viewport === buttonViewport}
-              className={viewport === buttonViewport ? "is-active" : ""}
-              key={buttonViewport}
-              onClick={() => setViewport(buttonViewport)}
-              title={viewportLabels[buttonViewport]}
-              type="button"
-            >
-              <Icon size={17} aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      </section>
+      <Toolbar
+        mode={mode}
+        onMode={setEditorMode}
+        sourceVisible={sourceVisible}
+        onToggleSource={() => setSourceVisible((current) => !current)}
+        dataActive={sidePanel === "data"}
+        onToggleData={() => setSidePanel((current) => (current === "data" ? "inspect" : "data"))}
+        runTrustedScripts={runTrustedScripts}
+        onToggleTrusted={toggleTrustedScripts}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={() => stepHistory(-1)}
+        onRedo={() => stepHistory(1)}
+        viewport={viewport}
+        onViewport={setViewport}
+      />
 
       <section className={`workspace ${sourceVisible ? "" : "source-hidden"}`}>
-        {sourceVisible ? (
-          <aside className="source-pane" aria-label="HTML source">
-            <div className="pane-title">
-              <span>HTML source</span>
-              <span>{sourceHtml.length.toLocaleString()} chars</span>
-            </div>
-            <textarea
-              aria-label="HTML source editor"
-              spellCheck={false}
-              value={sourceHtml}
-              onChange={(event) => setSourceHtml(event.target.value)}
-            />
-          </aside>
-        ) : (
-          <aside className="source-rail" aria-label="Collapsed HTML source">
-            <button
-              aria-label="Show HTML source"
-              onClick={() => setSourceVisible(true)}
-              title="Show HTML source"
-              type="button"
-            >
-              <PanelLeftOpen size={18} aria-hidden="true" />
-              <span>HTML</span>
-            </button>
-            <span>{sourceHtml.length.toLocaleString()}</span>
-          </aside>
-        )}
+        <SourcePane
+          value={sourceHtml}
+          onChange={setSourceHtml}
+          visible={sourceVisible}
+          onShow={() => setSourceVisible(true)}
+        />
 
         <section className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`} aria-label="Rendered HTML">
           <div className="pane-title">
@@ -596,59 +481,15 @@ export default function App() {
             />
           </div>
           {deckSlides.length ? (
-            <div className="deck-timeline" aria-label="Slide timeline">
-              <div className="timeline-header">
-                <div>
-                  <span>Timeline</span>
-                  <strong>
-                    {activeSlideIndex + 1} / {deckSlides.length}
-                  </strong>
-                </div>
-                <div className="timeline-actions">
-                  <button
-                    disabled={activeSlideIndex <= 0}
-                    onClick={() => stepDeckSlide(-1)}
-                    title="Previous slide"
-                    type="button"
-                  >
-                    <ChevronLeft size={16} aria-hidden="true" />
-                  </button>
-                  <button
-                    disabled={activeSlideIndex >= deckSlides.length - 1}
-                    onClick={() => stepDeckSlide(1)}
-                    title="Next slide"
-                    type="button"
-                  >
-                    <ChevronRight size={16} aria-hidden="true" />
-                  </button>
-                  <button onClick={duplicateCurrentSlide} title="Duplicate current slide" type="button">
-                    <CopyPlus size={16} aria-hidden="true" />
-                  </button>
-                  <button onClick={insertSlideAfterCurrent} title="Insert slide after current" type="button">
-                    <Plus size={16} aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-              <div className="slide-strip">
-                {deckSlides.map((slide) => (
-                  <button
-                    className={slide.id === activeSlideId ? "is-active" : ""}
-                    key={slide.id}
-                    onClick={() => goToDeckSlide(slide)}
-                    title={slide.title}
-                    type="button"
-                  >
-                    <span>{slide.index + 1}</span>
-                    <strong>{slide.title}</strong>
-                    {slide.section ? <em>{slide.section}</em> : null}
-                  </button>
-                ))}
-                <button className="slide-add" onClick={insertSlideAfterCurrent} title="Insert slide after current" type="button">
-                  <Layers3 size={18} aria-hidden="true" />
-                  <strong>New slide</strong>
-                </button>
-              </div>
-            </div>
+            <DeckTimeline
+              slides={deckSlides}
+              activeSlideId={activeSlideId}
+              activeSlideIndex={activeSlideIndex}
+              onGoSlide={goToDeckSlide}
+              onStep={stepDeckSlide}
+              onDuplicate={duplicateCurrentSlide}
+              onInsert={insertSlideAfterCurrent}
+            />
           ) : null}
         </section>
 
@@ -676,184 +517,34 @@ export default function App() {
           </div>
 
           {sidePanel === "data" ? (
-            <div className="data-panel">
-              <label>
-                Title
-                <input value={dataTitle} onChange={(event) => setDataTitle(event.target.value)} />
-              </label>
-
-              <label>
-                CSV
-                <textarea
-                  className="data-textarea"
-                  spellCheck={false}
-                  value={dataText}
-                  onChange={(event) => setDataRows(parseDataText(event.target.value))}
-                />
-              </label>
-
-              <div className="data-actions">
-                <button type="button" onClick={addDataRow} title="Add row">
-                  <Plus size={16} aria-hidden="true" />
-                  Row
-                </button>
-                <button type="button" onClick={addDataColumn} title="Add column">
-                  <Plus size={16} aria-hidden="true" />
-                  Column
-                </button>
-                <button className="primary" type="button" onClick={insertDataTable} title="Insert data table">
-                  <Table2 size={16} aria-hidden="true" />
-                  Insert
-                </button>
-              </div>
-
-              <div className="data-grid" aria-label="Data table editor">
-                {dataRows.map((row, rowIndex) => (
-                  <div
-                    className={`data-grid-row ${rowIndex === 0 ? "is-header" : ""}`}
-                    key={`row-${rowIndex}`}
-                    style={{ gridTemplateColumns: `repeat(${dataColumnCount}, minmax(88px, 1fr))` }}
-                  >
-                    {row.map((cell, cellIndex) => (
-                      <input
-                        aria-label={`Row ${rowIndex + 1} column ${cellIndex + 1}`}
-                        key={`cell-${rowIndex}-${cellIndex}`}
-                        onChange={(event) => updateDataCell(rowIndex, cellIndex, event.target.value)}
-                        value={cell}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DataPanel
+              dataTitle={dataTitle}
+              onTitle={setDataTitle}
+              dataText={dataText}
+              onDataText={(value) => setDataRows(parseDataText(value))}
+              dataRows={dataRows}
+              dataColumnCount={dataColumnCount}
+              onUpdateCell={updateDataCell}
+              onAddRow={addDataRow}
+              onAddColumn={addDataColumn}
+              onInsert={insertDataTable}
+            />
           ) : selected ? (
-            <div className="inspector-body">
-              <label>
-                Text
-                <textarea
-                  className="text-control"
-                  value={selected.text}
-                  onChange={(event) => updateSelectedText(event.target.value)}
-                />
-              </label>
-
-              <div className="field-grid">
-                <label>
-                  Text color
-                  <input
-                    type="color"
-                    value={fallbackColor(selected.styles.color, "#1f2933")}
-                    onChange={(event) => updateSelectedStyle({ color: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Fill
-                  <input
-                    type="color"
-                    value={fallbackColor(selected.styles.backgroundColor, "#ffffff")}
-                    onChange={(event) => updateSelectedStyle({ backgroundColor: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Font size
-                  <input
-                    min="8"
-                    max="180"
-                    type="number"
-                    value={numberFromCss(selected.styles.fontSize, "16")}
-                    onChange={(event) => updateSelectedStyle({ fontSize: `${event.target.value}px` })}
-                  />
-                </label>
-                <label>
-                  Radius
-                  <input
-                    min="0"
-                    max="80"
-                    type="number"
-                    value={numberFromCss(selected.styles.borderRadius, "0")}
-                    onChange={(event) => updateSelectedStyle({ borderRadius: `${event.target.value}px` })}
-                  />
-                </label>
-              </div>
-
-              <div className="align-row" aria-label="Text alignment">
-                {alignButtons.map(({ label, value, icon: Icon }) => (
-                  <button
-                    aria-label={label}
-                    aria-pressed={selected.styles.textAlign === value}
-                    className={selected.styles.textAlign === value ? "is-active" : ""}
-                    key={value}
-                    onClick={() => updateSelectedStyle({ textAlign: value })}
-                    title={label}
-                    type="button"
-                  >
-                    <Icon size={17} aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-
-              <div className="field-stack">
-                <label>
-                  Padding
-                  <input
-                    value={selected.styles.padding}
-                    onChange={(event) => updateSelectedStyle({ padding: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Margin
-                  <input
-                    value={selected.styles.margin}
-                    onChange={(event) => updateSelectedStyle({ margin: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Width
-                  <input
-                    value={selected.styles.width}
-                    onChange={(event) => updateSelectedStyle({ width: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Height
-                  <input
-                    value={selected.styles.height}
-                    onChange={(event) => updateSelectedStyle({ height: event.target.value })}
-                  />
-                </label>
-              </div>
-
-              <div className="nudge-grid" aria-label="Move controls">
-                <button type="button" onClick={() => postCommand("nudge", { dx: 0, dy: -8 })}>
-                  Up
-                </button>
-                <button type="button" onClick={() => postCommand("nudge", { dx: -8, dy: 0 })}>
-                  Left
-                </button>
-                <button type="button" onClick={() => postCommand("nudge", { dx: 8, dy: 0 })}>
-                  Right
-                </button>
-                <button type="button" onClick={() => postCommand("nudge", { dx: 0, dy: 8 })}>
-                  Down
-                </button>
-              </div>
-
-              <div className="inspector-actions">
-                <button type="button" onClick={() => postCommand("duplicate")}>
-                  <CopyPlus size={16} aria-hidden="true" />
-                  Duplicate
-                </button>
-                <button className="danger" type="button" onClick={() => postCommand("delete")}>
-                  <Trash2 size={16} aria-hidden="true" />
-                  Delete
-                </button>
-              </div>
-            </div>
+            <Inspector
+              selected={selected}
+              onText={updateSelectedText}
+              onStyle={updateSelectedStyle}
+              onSelectAncestor={(id) => postCommand("select", { id })}
+              onSelectParent={() => postCommand("select-parent")}
+              onAddClass={(name) => postCommand("set-class", { className: name, action: "add" })}
+              onRemoveClass={(name) => postCommand("set-class", { className: name, action: "remove" })}
+              onReplaceImage={(src, alt) => postCommand("replace-image", { src, alt })}
+              onNudge={(dx, dy) => postCommand("nudge", { dx, dy })}
+              onDuplicate={() => postCommand("duplicate")}
+              onDelete={() => postCommand("delete")}
+            />
           ) : (
-            <div className="empty-state">
-              <MousePointer2 size={28} aria-hidden="true" />
-              <span>No element selected</span>
-            </div>
+            <InspectorEmpty />
           )}
         </aside>
       </section>

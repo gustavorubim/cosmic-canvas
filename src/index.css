@@ -34,9 +34,11 @@ button:disabled {
 }
 
 .app-shell {
-  min-height: 100vh;
+  /* Lock the shell to the viewport so tall pane content (e.g. a long document
+     in the source editor) scrolls inside its pane instead of growing the page. */
+  height: 100vh;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr);
   background: #f4f6f8;
 }
 
@@ -307,6 +309,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+.source-pane {
+  /* minmax(0, 1fr) lets the editor row shrink so CodeMirror scrolls internally
+     instead of stretching the pane (and the whole page) to the document height. */
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .source-pane textarea {
   width: 100%;
   height: 100%;
@@ -321,6 +329,31 @@ button:disabled {
   font-size: 12px;
   line-height: 1.55;
   tab-size: 2;
+}
+
+.cm-host {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Fixed-height editor (the documented CodeMirror pattern): the editor fills
+   its host and the scroller overflows internally, so the document's height
+   never contributes to page layout. */
+.cm-host .cm-editor {
+  height: 100%;
+}
+
+.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-host .cm-scroller {
+  overflow: auto;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .preview-pane {
@@ -670,7 +703,168 @@ button:disabled {
   font-size: 14px;
 }
 
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e9ee;
+}
+
+.breadcrumb span {
+  display: inline-flex;
+  align-items: center;
+  color: #b8c2cc;
+}
+
+.breadcrumb button {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #52606d;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.breadcrumb button:hover {
+  background: #eef2f6;
+}
+
+.breadcrumb button.is-current {
+  color: #0f766e;
+  background: #eef8f6;
+}
+
+.field-label {
+  display: block;
+  color: #52606d;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.field-note {
+  padding: 9px 10px;
+  border: 1px dashed #c7d0da;
+  border-radius: 8px;
+  color: #66788a;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  color: #0f766e;
+  background: transparent;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.muted {
+  color: #8795a1;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.color-field {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 6px;
+}
+
+.color-text {
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+.class-editor,
+.image-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.class-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.class-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px 3px 9px;
+  border: 1px solid #c7d0da;
+  border-radius: 999px;
+  color: #26323f;
+  background: #f7fafc;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.class-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #66788a;
+  background: #e5e9ee;
+}
+
+.class-chip button:hover {
+  color: #9f2f21;
+  background: #fbe3de;
+}
+
+.class-add,
+.image-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.class-add button,
+.image-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-weight: 700;
+}
+
+.image-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  color: #0f766e;
+  background: #eef8f6;
+  font-weight: 700;
+}
+
 @media (max-width: 1180px) {
+  /* Stacked panes use fixed heights, so the page itself scrolls again. */
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
     grid-template-rows: 380px 620px 520px;

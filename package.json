@@ -7,18 +7,28 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "repair:native": "node scripts/repair-native-deps.mjs",
     "stress:generate": "node scripts/generate-stress-fixtures.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
+    "@codemirror/commands": "^6.6.2",
+    "@codemirror/lang-html": "^6.4.9",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.34.1",
+    "codemirror": "^6.0.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "typescript": "^5.6.2",
-    "vite": "^6.0.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1"
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.2",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.8"
   }
 }

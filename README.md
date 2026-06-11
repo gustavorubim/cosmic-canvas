@@ -23,15 +23,20 @@ Use it when you want to:
 
 ## Current Features
 
-- Paste and edit raw HTML source.
+- Paste and edit raw HTML source in a syntax-highlighted CodeMirror editor.
 - Open `.html` files directly, which is better than paste for very large documents.
+- Save edits back to the opened file (File System Access API, with download fallback).
+- Autosave a recovery draft and offer to restore it after an accidental tab close.
 - Render the HTML in a sandboxed iframe.
-- Click rendered elements to select them.
-- Edit text inline or through the inspector.
+- Click rendered elements to select them, and walk the element tree with a breadcrumb / Select parent.
+- Edit text inline or through the inspector (guarded so container elements are not flattened).
+- Add and remove CSS classes on the selected element.
+- Replace images by URL or by uploading a local file.
 - Change common styles such as text color, fill, font size, spacing, width, height, radius, and alignment.
-- Move selected elements by dragging in Move mode or with nudge buttons.
+- Move selected elements by dragging in Move mode or with nudge buttons (clean, non-stacking transforms).
 - Duplicate and delete selected elements.
-- Undo and redo document snapshots.
+- Undo and redo document snapshots, with scroll position preserved.
+- Keyboard shortcuts for save, undo/redo, delete, nudge, and deselect.
 - Copy or download the cleaned HTML output.
 - Preview desktop, tablet, and mobile widths.
 - Hide or show the source panel when you want a larger visual workspace.
@@ -135,6 +140,15 @@ flowchart TD
 7. Preview the result at desktop, tablet, and mobile widths.
 8. Copy or download the cleaned HTML.
 
+## Keyboard Shortcuts
+
+- **Ctrl/Cmd + S**: save to the opened file (or download a copy when the browser does not support direct file saving).
+- **Ctrl/Cmd + Z**: undo. **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z**: redo. (Ignored while typing in the source editor or a form field.)
+- **Delete**: remove the selected element. **Escape**: deselect.
+- **Arrow keys**: nudge the selected element by 8px (hold **Shift** for 1px).
+
+Element shortcuts apply when the selected element has focus inside the preview and you are not editing its text.
+
 ## Trusted Scripts
 
 By default, Cosmic Canvas keeps pasted scripts and inline event handlers inert while editing. That makes visual editing safer and more predictable for random or AI-generated HTML.
@@ -156,6 +170,13 @@ If npm is configured to install packages for a different operating system, insta
 npm install --os=win32 --cpu=x64
 ```
 
+If Vite fails with a missing native Rollup or esbuild package on Windows, repair npm's optional native dependencies. This can happen when a user-level `.npmrc` forces another OS, such as `os=linux`.
+
+```powershell
+npm run repair:native
+npm run dev
+```
+
 ## Build
 
 ```powershell
@@ -163,6 +184,16 @@ npm run build
 ```
 
 The static production build is written to `dist/`.
+
+## Tests
+
+```powershell
+npm test
+```
+
+Unit tests (Vitest + jsdom) cover the CSV parser/serializer and the HTML
+normalization, editor-bridge injection, script-inerting, and clean-export
+round-trips in `src/htmlDocument.ts`.
 
 ## Editing Model
 
@@ -208,13 +239,11 @@ http://127.0.0.1:5173/?load=/stress-fixtures/large-scripted-100000.html&trusted=
 
 Cosmic Canvas is aiming to become a friendly, free editor for everyday HTML polish. Good next additions:
 
-- Save and reload local drafts.
-- Add a richer code editor such as CodeMirror.
-- Add element tree navigation.
-- Add image replacement controls.
-- Add keyboard shortcuts for common actions.
+- Add a full element-tree panel (the inspector breadcrumb is a first step).
 - Add reusable page and presentation blocks.
 - Improve deck-aware editing for HTML slide decks.
+- Surface the selected element's source location in the code editor.
+- Offer a minimal-diff export mode that preserves original formatting.
 
 ## Deck Editing Roadmap
 
