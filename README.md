@@ -47,6 +47,76 @@ Cosmic Canvas has three main work areas:
 
 The app is intentionally browser-based. There is no required account, no backend service, and no document format lock-in. Your final output is still HTML.
 
+## App Flow
+
+Cosmic Canvas keeps the editor shell separate from the rendered document. The user edits through the React app, while the HTML document runs inside an iframe with a temporary editor bridge.
+
+```mermaid
+flowchart LR
+  User["User"] --> Shell["Cosmic Canvas app shell"]
+  Shell --> Source["Source panel"]
+  Shell --> Inspector["Inspector"]
+  Shell --> Toolbar["Mode and viewport toolbar"]
+  Shell --> Preview["Sandboxed iframe preview"]
+  Source --> Render["Apply source"]
+  Render --> Preview
+  Preview --> Selection["Selected element details"]
+  Selection --> Inspector
+  Inspector --> Preview
+  Preview --> Export["Copy or download clean HTML"]
+```
+
+The editing loop uses browser messages between the app shell and the iframe. Visual edits update the rendered document first, then the app cleans and stores the resulting HTML source.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant App as React app shell
+  participant Frame as Editable iframe
+  participant Cleaner as HTML cleanup
+
+  User->>App: Paste or open HTML
+  App->>Cleaner: Normalize input
+  Cleaner-->>App: Source HTML
+  App->>Frame: Prepare editable preview
+  Frame-->>App: Ready message
+  User->>Frame: Select, edit, move, or duplicate element
+  Frame-->>App: Selection and document-change messages
+  App->>Cleaner: Remove editor-only metadata
+  Cleaner-->>App: Updated clean source
+  User->>App: Copy or download
+```
+
+Editor modes keep the page behavior predictable. The same document can move between source editing, visual selection, movement, and preview without changing the final export format.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Text
+  Text --> Select: Select mode
+  Select --> Move: Move mode
+  Move --> Select: Select mode
+  Select --> Preview: Preview mode
+  Move --> Preview: Preview mode
+  Preview --> Text: Text mode
+  Text --> Preview: Preview mode
+  Select --> Text: Text mode
+  Move --> Text: Text mode
+```
+
+Clean export is the final checkpoint. Cosmic Canvas preserves the user document, but strips out temporary IDs, selection markers, hover markers, and editor bridge code before copy or download.
+
+```mermaid
+flowchart TD
+  Current["Current source HTML"] --> Parse["Parse document"]
+  Parse --> RemoveBridge["Remove editor bridge"]
+  RemoveBridge --> RemoveMarkers["Remove editor-only attributes"]
+  RemoveMarkers --> RestoreScripts["Restore preserved scripts and handlers"]
+  RestoreScripts --> Serialize["Serialize clean HTML"]
+  Serialize --> Output{"Export target"}
+  Output --> Copy["Clipboard"]
+  Output --> Download["HTML file"]
+```
+
 ## Editing Workflow
 
 1. Paste HTML into the source panel or use **Open file** to load a local document.
