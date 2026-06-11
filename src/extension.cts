@@ -143,13 +143,22 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.Uri.joinPath(this.context.extensionUri, "dist", "assets", styleFile),
     );
     const baseUri = `${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist"))}/`;
+    // The iframe uses srcdoc, so it inherits this webview CSP. Keep the app bundle
+    // local, but allow common CDN assets that trusted HTML decks often depend on.
+    const trustedAssetSources = [
+      "https://cdn.jsdelivr.net",
+      "https://unpkg.com",
+      "https://cdnjs.cloudflare.com",
+    ].join(" ");
     const csp = [
       "default-src 'none'",
-      `img-src ${webview.cspSource} data: blob:`,
-      `font-src ${webview.cspSource} data:`,
-      `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src ${webview.cspSource} 'unsafe-inline'`,
-      "frame-src data: blob:",
+      `img-src ${webview.cspSource} data: blob: https:`,
+      `font-src ${webview.cspSource} data: ${trustedAssetSources} https://fonts.gstatic.com`,
+      `style-src ${webview.cspSource} 'unsafe-inline' ${trustedAssetSources} https://fonts.googleapis.com`,
+      `script-src ${webview.cspSource} 'unsafe-inline' ${trustedAssetSources}`,
+      `connect-src ${webview.cspSource} data: blob: https:`,
+      "media-src data: blob: https:",
+      "frame-src data: blob: https:",
     ].join("; ");
 
     return `<!doctype html>
