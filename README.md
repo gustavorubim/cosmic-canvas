@@ -235,6 +235,10 @@ http://127.0.0.1:5173/?load=/stress-fixtures/large-scripted-100000.html&trusted=
 - Runtime DOM changes made by a document's own scripts may affect what gets exported after visual edits.
 - Moving elements is designed for practical visual adjustments, not full responsive layout design.
 
+## License
+
+Cosmic Canvas is released under the [MIT License](LICENSE).
+
 ## Project Direction
 
 Cosmic Canvas is aiming to become a friendly, free editor for everyday HTML polish. Good next additions:
