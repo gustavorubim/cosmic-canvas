@@ -99,6 +99,10 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.file-input {
+  display: none;
+}
+
 .button,
 .segmented button,
 .icon-group button,
@@ -129,6 +133,28 @@ button:disabled {
 
 .button.secondary {
   background: #f7fafc;
+}
+
+.script-toggle {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.script-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #0f766e;
 }
 
 .toolbar {
@@ -214,6 +240,9 @@ button:disabled {
 .pane-title span:last-child {
   color: #8795a1;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .source-pane textarea {
@@ -389,6 +418,10 @@ button:disabled {
   .toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .script-toggle {
+    width: 100%;
   }
 
   .toolbar-spacer {

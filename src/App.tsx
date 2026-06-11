@@ -7,6 +7,8 @@ import {
   CopyPlus,
   Download,
   Eye,
+  FileCode2,
+  Film,
   Monitor,
   MousePointer2,
   Move,
@@ -18,8 +20,8 @@ import {
   Type,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { cleanEditorHtml, prepareEditableHtml, SAMPLE_HTML } from "./htmlDocument";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { cleanEditorHtml, normalizeHtmlInput, prepareEditableHtml, SAMPLE_HTML } from "./htmlDocument";
 
 type EditorMode = "text" | "select" | "move" | "preview";
 type Viewport = "desktop" | "tablet" | "mobile";
@@ -46,6 +48,12 @@ type SelectedElement = {
 type HistoryState = {
   stack: string[];
   index: number;
+};
+
+type PreviewStatus = {
+  state: "loading" | "ready";
+  title: string;
+  bodyTextStart: string;
 };
 
 const viewportLabels: Record<Viewport, string> = {
@@ -90,6 +98,8 @@ function fallbackColor(value: string, fallback: string) {
 export default function App() {
   const initialHtml = useMemo(() => cleanEditorHtml(SAMPLE_HTML), []);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const didLoadUrlRef = useRef(false);
   const historyRef = useRef<HistoryState>({ stack: [initialHtml], index: 0 });
   const pendingHistoryTimer = useRef<number>();
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
@@ -97,6 +107,12 @@ export default function App() {
   const [selected, setSelected] = useState<SelectedElement | null>(null);
   const [mode, setMode] = useState<EditorMode>("text");
   const [viewport, setViewport] = useState<Viewport>("desktop");
+  const [runTrustedScripts, setRunTrustedScripts] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({
+    state: "loading",
+    title: "",
+    bodyTextStart: "",
+  });
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [clipboardState, setClipboardState] = useState("Copy");
 
@@ -124,11 +140,17 @@ export default function App() {
     pendingHistoryTimer.current = window.setTimeout(() => pushHistory(html), 450);
   }
 
-  function loadHtml(html: string, addToHistory = true) {
-    const clean = cleanEditorHtml(html);
-    setSourceHtml(clean);
-    setFrameHtml(prepareEditableHtml(clean));
+  function renderHtml(html: string, trustedScripts = runTrustedScripts) {
+    setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
+    setFrameHtml(prepareEditableHtml(html, trustedScripts));
     setSelected(null);
+  }
+
+  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts) {
+    const normalized = normalizeHtmlInput(html);
+    const clean = normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+    setSourceHtml(clean);
+    renderHtml(clean, trustedScripts);
     if (addToHistory) pushHistory(clean);
   }
 
@@ -164,8 +186,20 @@ export default function App() {
     const html = current.stack[nextIndex];
     syncHistoryState({ stack: current.stack, index: nextIndex });
     setSourceHtml(html);
-    setFrameHtml(prepareEditableHtml(html));
-    setSelected(null);
+    renderHtml(html);
+  }
+
+  function toggleTrustedScripts(enabled: boolean) {
+    setRunTrustedScripts(enabled);
+    renderHtml(sourceHtml, enabled);
+  }
+
+  async function openHtmlFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    loadHtml(text);
+    event.currentTarget.value = "";
   }
 
   async function copyHtml() {
@@ -190,6 +224,11 @@ export default function App() {
     function onMessage(event: MessageEvent) {
       const data = event.data || {};
       if (data.type === "wysiwyg-ready") {
+        setPreviewStatus({
+          state: "ready",
+          title: typeof data.title === "string" ? data.title : "",
+          bodyTextStart: typeof data.bodyTextStart === "string" ? data.bodyTextStart : "",
+        });
         postCommand("set-mode", { mode });
       }
 
@@ -211,6 +250,28 @@ export default function App() {
     };
   }, [mode]);
 
+  useEffect(() => {
+    if (didLoadUrlRef.current) return;
+    didLoadUrlRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const loadUrl = params.get("load");
+    if (!loadUrl) return;
+
+    const trusted = params.get("trusted") === "1";
+    setRunTrustedScripts(trusted);
+
+    fetch(loadUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
+        return response.text();
+      })
+      .then((html) => loadHtml(html, true, trusted))
+      .catch((error: unknown) => {
+        console.error(error);
+      });
+  }, []);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -224,6 +285,17 @@ export default function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <input
+            ref={fileInputRef}
+            accept=".html,.htm,text/html"
+            className="file-input"
+            onChange={openHtmlFile}
+            type="file"
+          />
+          <button className="button secondary" type="button" onClick={() => fileInputRef.current?.click()}>
+            <FileCode2 size={17} aria-hidden="true" />
+            Open file
+          </button>
           <button className="button secondary" type="button" onClick={() => loadHtml(sourceHtml)}>
             <RefreshCcw size={17} aria-hidden="true" />
             Apply source
@@ -257,6 +329,19 @@ export default function App() {
         </div>
 
         <div className="toolbar-spacer" />
+
+        <label
+          className="script-toggle"
+          title="Run pasted scripts and inline handlers in the preview. Use only for HTML you trust."
+        >
+          <input
+            checked={runTrustedScripts}
+            onChange={(event) => toggleTrustedScripts(event.target.checked)}
+            type="checkbox"
+          />
+          <Film size={16} aria-hidden="true" />
+          Trusted scripts
+        </label>
 
         <div className="icon-group" aria-label="History">
           <button disabled={!canUndo} onClick={() => stepHistory(-1)} title="Undo" type="button">
@@ -301,7 +386,11 @@ export default function App() {
         <section className="preview-pane" aria-label="Rendered HTML">
           <div className="pane-title">
             <span>Rendered page</span>
-            <span>{viewportLabels[viewport]}</span>
+            <span title={previewStatus.bodyTextStart || undefined}>
+              {previewStatus.state === "ready"
+                ? `${viewportLabels[viewport]} · ${previewStatus.title || "Ready"}`
+                : `${viewportLabels[viewport]} · Loading`}
+            </span>
           </div>
           <div className={`preview-frame preview-frame-${viewport}`}>
             <iframe

@@ -143,12 +143,10 @@ const EDITOR_SCRIPT = String.raw`
     return "el-" + idCounter++;
   }
 
-  function ensureIds() {
-    const candidates = [document.body, ...Array.from(document.body.querySelectorAll("*"))];
-    for (const element of candidates) {
-      if (!element || element.dataset.wysiwygEditor === "true") continue;
-      if (!element.dataset.wysiwygId) element.dataset.wysiwygId = nextId();
-    }
+  function ensureId(element) {
+    if (!element || element.dataset.wysiwygEditor === "true") return "";
+    if (!element.dataset.wysiwygId) element.dataset.wysiwygId = nextId();
+    return element.dataset.wysiwygId;
   }
 
   function serialize() {
@@ -184,7 +182,7 @@ const EDITOR_SCRIPT = String.raw`
     const rect = selectedElement.getBoundingClientRect();
     post("wysiwyg-selection", {
       selected: {
-        id: selectedElement.dataset.wysiwygId,
+        id: ensureId(selectedElement),
         tagName: selectedElement.tagName.toLowerCase(),
         text: selectedElement.textContent || "",
         childElementCount: selectedElement.childElementCount,
@@ -231,13 +229,14 @@ const EDITOR_SCRIPT = String.raw`
   function pickElement(start) {
     if (!(start instanceof Element)) return null;
     if (start.dataset.wysiwygEditor === "true") return null;
+    if (start.closest('[data-wysiwyg-editor="true"]')) return null;
     if (start === document.documentElement || start === document.head) return null;
-    return start.closest("[data-wysiwyg-id]") || (start === document.body ? document.body : null);
+    return start === document.body ? document.body : start;
   }
 
   function selectElement(element) {
     if (!element) return;
-    ensureIds();
+    ensureId(element);
     if (selectedElement && selectedElement !== element) {
       selectedElement.removeAttribute("data-wysiwyg-selected");
       restoreContentEditable(selectedElement);
@@ -285,7 +284,6 @@ const EDITOR_SCRIPT = String.raw`
     clone.removeAttribute("data-wysiwyg-selected");
     clone.querySelectorAll("[data-wysiwyg-id]").forEach((element) => element.removeAttribute("data-wysiwyg-id"));
     selectedElement.after(clone);
-    ensureIds();
     selectElement(clone);
     publishChange("duplicate");
   }
@@ -295,7 +293,6 @@ const EDITOR_SCRIPT = String.raw`
     const next = selectedElement.parentElement || document.body;
     selectedElement.remove();
     selectedElement = null;
-    ensureIds();
     selectElement(next);
     publishChange("delete");
   }
@@ -388,19 +385,24 @@ const EDITOR_SCRIPT = String.raw`
     if (data.command === "request-html") publishChange("request");
   });
 
-  ensureIds();
-  post("wysiwyg-ready", {});
+  post("wysiwyg-ready", {
+    title: document.title || "",
+    bodyTextStart: (document.body ? document.body.textContent || "" : "").trim().slice(0, 180)
+  });
 })();
 `;
 
 function parseDocument(html: string): Document {
   const parser = new DOMParser();
+  return parser.parseFromString(normalizeHtmlInput(html), "text/html");
+}
+
+export function normalizeHtmlInput(html: string): string {
   const trimmed = html.trim();
   const looksComplete = /<!doctype|<html[\s>]/i.test(trimmed);
-  const normalized = looksComplete
+  return looksComplete
     ? trimmed
     : `<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head><body>${trimmed}</body></html>`;
-  return parser.parseFromString(normalized, "text/html");
 }
 
 function ensureDocumentShape(doc: Document) {
@@ -490,6 +492,34 @@ function removeEditorArtifacts(doc: Document) {
   });
 }
 
+function editorStyleTag() {
+  return `<style data-wysiwyg-editor="true">${EDITOR_STYLE}</style>`;
+}
+
+function editorScriptTag() {
+  return `<script data-wysiwyg-editor="true">${EDITOR_SCRIPT}</script>`;
+}
+
+function injectEditorBridge(html: string): string {
+  let nextHtml = normalizeHtmlInput(html);
+  const style = editorStyleTag();
+  const script = editorScriptTag();
+
+  if (/<\/head\s*>/i.test(nextHtml)) {
+    nextHtml = nextHtml.replace(/<\/head\s*>/i, `${style}</head>`);
+  } else {
+    nextHtml = `${style}${nextHtml}`;
+  }
+
+  if (/<\/body\s*>/i.test(nextHtml)) {
+    nextHtml = nextHtml.replace(/<\/body\s*>/i, `${script}</body>`);
+  } else {
+    nextHtml = `${nextHtml}${script}`;
+  }
+
+  return nextHtml;
+}
+
 export function cleanEditorHtml(html: string): string {
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
@@ -499,7 +529,11 @@ export function cleanEditorHtml(html: string): string {
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 
-export function prepareEditableHtml(html: string): string {
+export function prepareEditableHtml(html: string, runTrustedScripts = false): string {
+  if (runTrustedScripts) {
+    return injectEditorBridge(html);
+  }
+
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
   removeEditorArtifacts(doc);
