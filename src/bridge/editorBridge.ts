@@ -255,6 +255,25 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       .join("");
   }
 
+  function cssUrlValue(value: string) {
+    if (!value || value === "none") return "";
+    const match = value.match(/^url\((["']?)(.*)\1\)$/);
+    return match ? match[2] : value;
+  }
+
+  function cssUrl(src: string) {
+    return 'url("' + src.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '")';
+  }
+
+  function imageFitMode(element: Element | null) {
+    if (!element) return "";
+    const fit = ((element as HTMLElement).style.objectFit || win.getComputedStyle(element).objectFit || "").trim();
+    if (fit === "contain") return "fit";
+    if (fit === "fill") return "fill";
+    if (fit === "cover") return "crop";
+    return "";
+  }
+
   function isRevealStack(element: Element) {
     return (
       element.matches(".reveal .slides > section") &&
@@ -549,6 +568,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const styles = win.getComputedStyle(selectedElement);
     const rect = selectedElement.getBoundingClientRect();
     const isImage = selectedElement.tagName.toLowerCase() === "img";
+    const canHaveBackground = selectedElement === document.body || selectedElement.matches(SLIDE_SELECTOR);
     post("wysiwyg-selection", {
       selected: {
         id: ensureId(selectedElement),
@@ -560,6 +580,10 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         ancestors: breadcrumb(selectedElement),
         isImage,
         imageSrc: isImage ? selectedElement.getAttribute("src") || "" : "",
+        imageAlt: isImage ? selectedElement.getAttribute("alt") || "" : "",
+        imageFit: isImage ? imageFitMode(selectedElement) : "",
+        canHaveBackground,
+        backgroundImage: canHaveBackground ? cssUrlValue(styles.backgroundImage) : "",
         styles: {
           color: colorToHex(styles.color),
           backgroundColor: colorToHex(styles.backgroundColor),
@@ -730,8 +754,42 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   function replaceImage(src: unknown, alt: unknown) {
     if (!selectedElement || selectedElement.tagName.toLowerCase() !== "img") return;
     if (typeof src === "string" && src) selectedElement.setAttribute("src", src);
+    selectedElement.removeAttribute("data-cosmic-image-error");
     if (typeof alt === "string") selectedElement.setAttribute("alt", alt);
     publishChange("image");
+  }
+
+  function setImageFit(fit: unknown) {
+    if (!selectedElement || selectedElement.tagName.toLowerCase() !== "img") return;
+    const image = selectedElement as HTMLElement;
+    if (fit === "fit") image.style.objectFit = "contain";
+    else if (fit === "fill") image.style.objectFit = "fill";
+    else if (fit === "crop") image.style.objectFit = "cover";
+    else return;
+    image.style.objectPosition = "center";
+    publishChange("image-fit");
+  }
+
+  function backgroundTarget() {
+    if (selectedElement === document.body) return document.body;
+    if (selectedElement?.matches(SLIDE_SELECTOR)) return selectedElement as HTMLElement;
+    const selectedSlide = selectedElement?.closest(SLIDE_SELECTOR) as HTMLElement | null;
+    if (selectedSlide) return selectedSlide;
+    return (nearestSlide(slideCandidates()) as HTMLElement | null) || document.body;
+  }
+
+  function replaceBackground(src: unknown) {
+    const target = backgroundTarget();
+    const value = String(src || "").trim();
+    if (!value) {
+      target.style.backgroundImage = "";
+      publishChange("background");
+      return;
+    }
+    target.style.backgroundImage = cssUrl(value);
+    target.style.backgroundSize = "cover";
+    target.style.backgroundPosition = "center";
+    publishChange("background");
   }
 
   function duplicateSelected() {
@@ -1690,6 +1748,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "set-text") setText(String(data.text || ""));
     if (data.command === "set-class") setClass(data.className, data.action);
     if (data.command === "replace-image") replaceImage(data.src, data.alt);
+    if (data.command === "set-image-fit") setImageFit(data.fit);
+    if (data.command === "replace-background") replaceBackground(data.src);
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);

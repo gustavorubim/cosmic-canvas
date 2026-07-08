@@ -144,6 +144,12 @@ const EDITOR_STYLE = `
     box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.28) !important;
   }
 
+  [data-cosmic-image-error="true"] {
+    outline: 3px solid #cf513d !important;
+    outline-offset: 3px !important;
+    box-shadow: 0 0 0 6px rgba(207, 81, 61, 0.18) !important;
+  }
+
   html[data-wysiwyg-mode="select"] body,
   html[data-wysiwyg-mode="select"] body * {
     cursor: default !important;
@@ -312,6 +318,9 @@ function removeEditorArtifacts(doc: Document) {
   doc.querySelectorAll("[data-wysiwyg-hover]").forEach((element) => element.removeAttribute("data-wysiwyg-hover"));
   doc.querySelectorAll("[data-wysiwyg-selected]").forEach((element) => element.removeAttribute("data-wysiwyg-selected"));
   doc.querySelectorAll("[data-wysiwyg-editing]").forEach((element) => element.removeAttribute("data-wysiwyg-editing"));
+  doc.querySelectorAll("[data-cosmic-image-error]").forEach((element) =>
+    element.removeAttribute("data-cosmic-image-error"),
+  );
   doc.querySelectorAll("[data-wysiwyg-current-slide]").forEach((element) =>
     element.removeAttribute("data-wysiwyg-current-slide"),
   );

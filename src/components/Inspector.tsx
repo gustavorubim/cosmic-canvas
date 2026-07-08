@@ -20,7 +20,12 @@ import {
   X,
 } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { type InlineFormatAction, type LayoutAction, type SelectedElement } from "../protocol";
+import {
+  type ImageFitMode,
+  type InlineFormatAction,
+  type LayoutAction,
+  type SelectedElement,
+} from "../protocol";
 
 const alignButtons = [
   { label: "Left", value: "left", icon: AlignLeft },
@@ -46,6 +51,12 @@ const insertButtons = [
   { kind: "button", label: "Button", icon: MousePointer2 },
   { kind: "box", label: "Box", icon: Square },
 ] as const;
+
+const imageFitButtons: Array<{ fit: ImageFitMode; label: string }> = [
+  { fit: "fit", label: "Fit" },
+  { fit: "fill", label: "Fill" },
+  { fit: "crop", label: "Crop" },
+];
 
 const richTextButtons = [
   { action: "bold", label: "Bold", icon: Bold },
@@ -108,6 +119,8 @@ type InspectorProps = {
   onAddClass: (name: string) => void;
   onRemoveClass: (name: string) => void;
   onReplaceImage: (src: string, alt?: string) => void;
+  onImageFit: (fit: ImageFitMode) => void;
+  onReplaceBackground: (src: string) => void;
   onNudge: (dx: number, dy: number) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -124,6 +137,8 @@ export function Inspector({
   onAddClass,
   onRemoveClass,
   onReplaceImage,
+  onImageFit,
+  onReplaceBackground,
   onNudge,
   onDuplicate,
   onDelete,
@@ -133,9 +148,13 @@ export function Inspector({
 }: InspectorProps) {
   const [classDraft, setClassDraft] = useState("");
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
+  const [imageAlt, setImageAlt] = useState(selected.imageAlt);
+  const [backgroundUrl, setBackgroundUrl] = useState(selected.backgroundImage);
   const imageFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setImageUrl(selected.imageSrc), [selected.id, selected.imageSrc]);
+  useEffect(() => setImageAlt(selected.imageAlt), [selected.id, selected.imageAlt]);
+  useEffect(() => setBackgroundUrl(selected.backgroundImage), [selected.id, selected.backgroundImage]);
 
   function submitClass() {
     const name = classDraft.trim();
@@ -161,7 +180,7 @@ export function Inspector({
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
-    onReplaceImage(dataUrl);
+    onReplaceImage(dataUrl, imageAlt);
   }
 
   return (
@@ -251,11 +270,34 @@ export function Inspector({
                 placeholder="https:// or data:"
                 value={imageUrl}
                 onChange={(event) => setImageUrl(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl)}
+                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl, imageAlt)}
               />
-              <button onClick={() => onReplaceImage(imageUrl)} title="Apply image URL" type="button">
+              <button onClick={() => onReplaceImage(imageUrl, imageAlt)} title="Apply image URL" type="button">
                 Set
               </button>
+            </div>
+            <label>
+              Alt text
+              <input
+                aria-label="Image alt text"
+                value={imageAlt}
+                onBlur={() => onReplaceImage(imageUrl, imageAlt)}
+                onChange={(event) => setImageAlt(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl, imageAlt)}
+              />
+            </label>
+            <div className="fit-row" aria-label="Image fit">
+              {imageFitButtons.map(({ fit, label }) => (
+                <button
+                  aria-pressed={selected.imageFit === fit}
+                  className={selected.imageFit === fit ? "is-active" : ""}
+                  key={fit}
+                  onClick={() => onImageFit(fit)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             <input
               ref={imageFileRef}
@@ -267,6 +309,24 @@ export function Inspector({
             <button className="image-upload" onClick={() => imageFileRef.current?.click()} type="button">
               <ImageUp size={15} aria-hidden="true" />
               Replace from file
+            </button>
+          </div>
+        </details>
+      ) : null}
+
+      {selected.canHaveBackground ? (
+        <details className="inspector-group" open>
+          <summary>Background</summary>
+          <div className="image-row">
+            <input
+              aria-label="Background image URL"
+              placeholder="https:// or data:"
+              value={backgroundUrl}
+              onChange={(event) => setBackgroundUrl(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && onReplaceBackground(backgroundUrl)}
+            />
+            <button onClick={() => onReplaceBackground(backgroundUrl)} title="Apply background" type="button">
+              Set
             </button>
           </div>
         </details>

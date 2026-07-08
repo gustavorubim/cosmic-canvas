@@ -651,6 +651,75 @@ describe("resize and layout controls", () => {
   });
 });
 
+describe("image and background controls", () => {
+  it("sets image alt text and object fit modes", () => {
+    const { win } = createWindow(`
+      <!doctype html><html><head><title>Images</title></head><body>
+        <section class="slide" data-title="Image slide">
+          <img id="hero" src="old.png" alt="Old alt" style="width: 100px; height: 80px" />
+        </section>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    const image = win.document.getElementById("hero") as HTMLImageElement;
+
+    click(win, image);
+    postCommand(win, { command: "replace-image", src: "new.png", alt: "Updated alt" });
+    postCommand(win, { command: "set-image-fit", fit: "fit" });
+    expect(image.getAttribute("src")).toBe("new.png");
+    expect(image.getAttribute("alt")).toBe("Updated alt");
+    expect(image.style.objectFit).toBe("contain");
+
+    postCommand(win, { command: "set-image-fit", fit: "fill" });
+    expect(image.style.objectFit).toBe("fill");
+
+    postCommand(win, { command: "set-image-fit", fit: "crop" });
+    expect(image.style.objectFit).toBe("cover");
+    expect(image.style.objectPosition).toBe("center");
+  });
+
+  it("replaces slide and body background images", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+    postCommand(win, { command: "select", id: firstSlide.id });
+    postCommand(win, { command: "replace-background", src: "https://example.com/slide.png" });
+
+    const slide = win.document.querySelector("section.slide") as HTMLElement;
+    expect(slide.style.backgroundImage).toContain("https://example.com/slide.png");
+    expect(slide.style.backgroundSize).toBe("cover");
+    expect(slide.style.backgroundPosition).toBe("center");
+
+    const plain = createWindow("<main><p>Plain page</p></main>");
+    installKeyboardFence(plain.win);
+    installEditorBridge(plain.win);
+    postCommand(plain.win, { command: "replace-background", src: "https://example.com/body.png" });
+    expect(plain.win.document.body.style.backgroundImage).toContain("https://example.com/body.png");
+  });
+
+  it("marks broken images for audit without exporting the marker", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><head><title>Broken</title></head><body>
+        <img id="broken" src="missing.png" alt="Broken" />
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    const image = win.document.getElementById("broken") as HTMLImageElement;
+
+    image.dispatchEvent(new win.Event("error", { bubbles: true, cancelable: true }));
+    postCommand(win, { command: "request-audit" });
+
+    expect(image.getAttribute("data-cosmic-image-error")).toBe("true");
+    expect(latestAuditMessage(messages).findings.map((finding: { type: string }) => finding.type)).toContain(
+      "broken-image",
+    );
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).not.toContain("data-cosmic-image-error");
+  });
+});
+
 describe("validation audit", () => {
   it("reports document quality findings with selectable element ids", () => {
     const { win, messages } = createWindow(`

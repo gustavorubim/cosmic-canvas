@@ -17,6 +17,7 @@ export type SlideTemplateKind =
   | "agenda"
   | "closing";
 export type LayoutAction = "align-left" | "align-center" | "align-right" | "distribute-horizontal";
+export type ImageFitMode = "fit" | "fill" | "crop";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -35,6 +36,10 @@ export type SelectedElement = {
   ancestors: BreadcrumbNode[];
   isImage: boolean;
   imageSrc: string;
+  imageAlt: string;
+  imageFit: ImageFitMode | "";
+  canHaveBackground: boolean;
+  backgroundImage: string;
   styles: {
     color: string;
     backgroundColor: string;
@@ -88,6 +93,8 @@ export type BridgeCommand =
   | { command: "set-text"; text: string }
   | { command: "set-class"; className: string; action: "add" | "remove" | "toggle" }
   | { command: "replace-image"; src: string; alt?: string }
+  | { command: "set-image-fit"; fit: ImageFitMode }
+  | { command: "replace-background"; src: string }
   | { command: "duplicate" }
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }

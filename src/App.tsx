@@ -19,6 +19,7 @@ import {
   type EditorMode,
   isBridgeMessage,
   type AuditFinding,
+  type ImageFitMode,
   type InlineFormatAction,
   type LayoutAction,
   type SelectedElement,
@@ -329,6 +330,14 @@ export default function App() {
 
   function updateSelectedLayout(action: LayoutAction) {
     postCommand("layout", { action });
+  }
+
+  function updateImageFit(fit: ImageFitMode) {
+    postCommand("set-image-fit", { fit });
+  }
+
+  function updateBackground(src: string) {
+    postCommand("replace-background", { src });
   }
 
   function stepHistory(offset: number) {
@@ -844,6 +853,8 @@ export default function App() {
               onAddClass={(name) => postCommand("set-class", { className: name, action: "add" })}
               onRemoveClass={(name) => postCommand("set-class", { className: name, action: "remove" })}
               onReplaceImage={(src, alt) => postCommand("replace-image", { src, alt })}
+              onImageFit={updateImageFit}
+              onReplaceBackground={updateBackground}
               onNudge={(dx, dy) => postCommand("nudge", { dx, dy })}
               onDuplicate={() => postCommand("duplicate")}
               onDelete={() => postCommand("delete")}
