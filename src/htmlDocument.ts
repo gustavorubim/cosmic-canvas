@@ -197,6 +197,29 @@ const EDITOR_STYLE = `
   .wysiwyg-chip button.danger:hover {
     background: #7f2a1d;
   }
+
+  .wysiwyg-resize-handle {
+    position: absolute;
+    z-index: 2147483647;
+    width: 15px;
+    height: 15px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 2px solid #ffffff;
+    border-radius: 4px;
+    background: #d97706;
+    box-shadow: 0 3px 10px rgba(31, 41, 51, 0.28);
+    cursor: nwse-resize !important;
+  }
+
+  .wysiwyg-resize-handle::after {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-right: 1px solid rgba(255, 255, 255, 0.86);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.86);
+  }
 `;
 
 function parseDocument(html: string): Document {

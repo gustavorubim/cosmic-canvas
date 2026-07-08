@@ -209,8 +209,16 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     baseDx: number;
     baseDy: number;
   } | null = null;
+  let resizeState: {
+    element: HTMLElement;
+    startX: number;
+    startY: number;
+    baseWidth: number;
+    baseHeight: number;
+  } | null = null;
   let chip: HTMLDivElement | null = null;
   let chipLabel: HTMLSpanElement | null = null;
+  let resizeHandle: HTMLButtonElement | null = null;
 
   const fenceState = win.__cosmicFenceState || (win.__cosmicFenceState = { mode });
 
@@ -469,9 +477,55 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return chip;
   }
 
+  function ensureResizeHandle() {
+    if (resizeHandle) return resizeHandle;
+    resizeHandle = document.createElement("button");
+    resizeHandle.type = "button";
+    resizeHandle.className = "wysiwyg-resize-handle";
+    resizeHandle.dataset.wysiwygEditor = "true";
+    resizeHandle.dataset.wysiwygResizeHandle = "se";
+    resizeHandle.title = "Resize";
+    resizeHandle.setAttribute("aria-label", "Resize selected element");
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      if (!selectedElement || mode === "preview") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const element = selectedElement as HTMLElement;
+      const rect = element.getBoundingClientRect();
+      const styles = win.getComputedStyle(element);
+      const width = Number.parseFloat(element.style.width || "") || rect.width || Number.parseFloat(styles.width || "0");
+      const height = Number.parseFloat(element.style.height || "") || rect.height || Number.parseFloat(styles.height || "0");
+      resizeState = {
+        element,
+        startX: event.clientX,
+        startY: event.clientY,
+        baseWidth: width || 24,
+        baseHeight: height || 24,
+      };
+      resizeHandle?.setPointerCapture?.(event.pointerId);
+    });
+    document.body.append(resizeHandle);
+    return resizeHandle;
+  }
+
+  function updateResizeHandle() {
+    if (!selectedElement || mode === "preview" || selectedElement === document.body) {
+      if (resizeHandle) resizeHandle.style.display = "none";
+      return;
+    }
+    ensureResizeHandle();
+    if (resizeHandle && !document.body.contains(resizeHandle)) document.body.append(resizeHandle);
+    if (!resizeHandle) return;
+    const rect = selectedElement.getBoundingClientRect();
+    resizeHandle.style.display = "grid";
+    resizeHandle.style.left = Math.max(4, rect.right + win.scrollX - 8) + "px";
+    resizeHandle.style.top = Math.max(4, rect.bottom + win.scrollY - 8) + "px";
+  }
+
   function updateChip() {
     if (!selectedElement || mode === "preview" || !document.body.contains(selectedElement)) {
       if (chip) chip.style.display = "none";
+      if (resizeHandle) resizeHandle.style.display = "none";
       return;
     }
     ensureChip();
@@ -482,6 +536,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const rect = selectedElement.getBoundingClientRect();
     chip.style.top = Math.max(win.scrollY + 4, rect.top + win.scrollY - 30) + "px";
     chip.style.left = Math.max(4, rect.left + win.scrollX) + "px";
+    updateResizeHandle();
   }
 
   function publishSelected() {
@@ -726,6 +781,46 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const current = currentTranslate(htmlElement);
     setTranslate(htmlElement, current.dx + dx, current.dy + dy);
     publishChange("move");
+  }
+
+  function layoutSelected(action: unknown) {
+    if (!selectedElement || selectedElement === document.body) return;
+    const element = selectedElement as HTMLElement;
+    if (action === "align-left") {
+      element.style.display = "block";
+      element.style.marginLeft = "0";
+      element.style.marginRight = "auto";
+      publishChange("layout");
+      return;
+    }
+    if (action === "align-center") {
+      element.style.display = "block";
+      element.style.marginLeft = "auto";
+      element.style.marginRight = "auto";
+      publishChange("layout");
+      return;
+    }
+    if (action === "align-right") {
+      element.style.display = "block";
+      element.style.marginLeft = "auto";
+      element.style.marginRight = "0";
+      publishChange("layout");
+      return;
+    }
+    if (action === "distribute-horizontal") {
+      const parent = selectedElement.parentElement as HTMLElement | null;
+      if (!parent) return;
+      const siblings = Array.from(parent.children).filter((child) => {
+        const htmlChild = child as HTMLElement;
+        return htmlChild.dataset.wysiwygEditor !== "true" && child.tagName.toLowerCase() !== "script";
+      });
+      if (siblings.length < 2) return;
+      parent.style.display = "flex";
+      parent.style.justifyContent = "space-between";
+      parent.style.alignItems = parent.style.alignItems || "stretch";
+      parent.style.gap = parent.style.gap || "16px";
+      publishChange("layout");
+    }
   }
 
   function goToSlide(payload: Record<string, unknown>) {
@@ -1451,6 +1546,15 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   document.addEventListener(
     "pointermove",
     (event) => {
+      if (resizeState) {
+        event.preventDefault();
+        const width = Math.max(24, Math.round(resizeState.baseWidth + event.clientX - resizeState.startX));
+        const height = Math.max(24, Math.round(resizeState.baseHeight + event.clientY - resizeState.startY));
+        resizeState.element.style.width = width + "px";
+        resizeState.element.style.height = height + "px";
+        publishSelected();
+        return;
+      }
       if (!dragState) return;
       event.preventDefault();
       const dx = Math.round(event.clientX - dragState.startX);
@@ -1464,6 +1568,11 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   document.addEventListener(
     "pointerup",
     () => {
+      if (resizeState) {
+        resizeState = null;
+        publishChange("resize");
+        return;
+      }
       if (!dragState) return;
       dragState = null;
       publishChange("move");
@@ -1594,6 +1703,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);
     if (data.command === "nudge") nudge(Number(data.dx || 0), Number(data.dy || 0));
+    if (data.command === "layout") layoutSelected(data.action);
     if (data.command === "scroll-to") win.scrollTo(Number(data.x || 0), Number(data.y || 0));
     if (data.command === "request-audit") publishAudit();
     if (data.command === "request-html") publishChange("request");

@@ -70,6 +70,18 @@ function keydown(win: TestWindow, target: EventTarget, key: string, init: Keyboa
   return event;
 }
 
+function pointer(win: TestWindow, target: EventTarget, type: string, x: number, y: number) {
+  const event = new win.MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+  }) as MouseEvent & { pointerId?: number };
+  Object.defineProperty(event, "pointerId", { configurable: true, value: 1 });
+  target.dispatchEvent(event);
+  return event;
+}
+
 function latestDeckMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-deck").at(-1);
 }
@@ -586,6 +598,56 @@ describe("element insertion commands", () => {
     const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
     expect(cleaned).not.toContain("data-wysiwyg-");
     expect(cleaned).toContain(text ?? "Placeholder image");
+  });
+});
+
+describe("resize and layout controls", () => {
+  it("resizes the selected element from the editor handle", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as HTMLElement;
+    paragraph.style.width = "100px";
+    paragraph.style.height = "50px";
+
+    click(win, paragraph);
+    const handle = win.document.querySelector("[data-wysiwyg-resize-handle]") as HTMLElement | null;
+    expect(handle).not.toBeNull();
+
+    pointer(win, handle as HTMLElement, "pointerdown", 10, 10);
+    pointer(win, win.document, "pointermove", 35, 25);
+    pointer(win, win.document, "pointerup", 35, 25);
+
+    expect(paragraph.style.width).toBe("125px");
+    expect(paragraph.style.height).toBe("65px");
+    expect(messages).toContainEqual(expect.objectContaining({ type: "wysiwyg-document-change", reason: "resize" }));
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).not.toContain("wysiwyg-resize-handle");
+  });
+
+  it("aligns the selected element within its parent", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as HTMLElement;
+    click(win, paragraph);
+
+    postCommand(win, { command: "layout", action: "align-center" });
+
+    expect(paragraph.style.display).toBe("block");
+    expect(paragraph.style.marginLeft).toBe("auto");
+    expect(paragraph.style.marginRight).toBe("auto");
+    expect(messages).toContainEqual(expect.objectContaining({ type: "wysiwyg-document-change", reason: "layout" }));
+  });
+
+  it("distributes selected element siblings through the parent", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as HTMLElement;
+    const slide = paragraph.closest("section.slide") as HTMLElement;
+    click(win, paragraph);
+
+    postCommand(win, { command: "layout", action: "distribute-horizontal" });
+
+    expect(slide.style.display).toBe("flex");
+    expect(slide.style.justifyContent).toBe("space-between");
+    expect(slide.style.gap).toBe("16px");
   });
 });
 

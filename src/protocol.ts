@@ -16,6 +16,7 @@ export type SlideTemplateKind =
   | "metrics"
   | "agenda"
   | "closing";
+export type LayoutAction = "align-left" | "align-center" | "align-right" | "distribute-horizontal";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -104,6 +105,7 @@ export type BridgeCommand =
   | { command: "insert-table"; columns: string[]; rows: string[][]; title: string }
   | { command: "go-slide"; id: string }
   | { command: "nudge"; dx: number; dy: number }
+  | { command: "layout"; action: LayoutAction }
   | { command: "scroll-to"; x: number; y: number }
   | { command: "request-audit" }
   | { command: "request-html" };

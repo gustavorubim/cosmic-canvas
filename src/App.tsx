@@ -20,6 +20,7 @@ import {
   isBridgeMessage,
   type AuditFinding,
   type InlineFormatAction,
+  type LayoutAction,
   type SelectedElement,
   type SlideTemplateKind,
   type Viewport,
@@ -324,6 +325,10 @@ export default function App() {
       return;
     }
     postCommand("format-inline", { action });
+  }
+
+  function updateSelectedLayout(action: LayoutAction) {
+    postCommand("layout", { action });
   }
 
   function stepHistory(offset: number) {
@@ -844,6 +849,7 @@ export default function App() {
               onDelete={() => postCommand("delete")}
               onInsertElement={(kind) => postCommand("insert-element", { kind })}
               onFormatInline={formatInline}
+              onLayout={updateSelectedLayout}
             />
           ) : (
             <InspectorEmpty />

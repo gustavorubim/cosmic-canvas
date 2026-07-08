@@ -1,5 +1,6 @@
 import {
   AlignCenter,
+  AlignHorizontalDistributeCenter,
   AlignLeft,
   AlignRight,
   Bold,
@@ -19,12 +20,23 @@ import {
   X,
 } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { type InlineFormatAction, type SelectedElement } from "../protocol";
+import { type InlineFormatAction, type LayoutAction, type SelectedElement } from "../protocol";
 
 const alignButtons = [
   { label: "Left", value: "left", icon: AlignLeft },
   { label: "Center", value: "center", icon: AlignCenter },
   { label: "Right", value: "right", icon: AlignRight },
+];
+
+const layoutButtons: Array<{ label: string; action: LayoutAction; icon: typeof AlignLeft }> = [
+  { label: "Align element left", action: "align-left", icon: AlignLeft },
+  { label: "Align element center", action: "align-center", icon: AlignCenter },
+  { label: "Align element right", action: "align-right", icon: AlignRight },
+  {
+    label: "Distribute siblings",
+    action: "distribute-horizontal",
+    icon: AlignHorizontalDistributeCenter,
+  },
 ];
 
 const insertButtons = [
@@ -101,6 +113,7 @@ type InspectorProps = {
   onDelete: () => void;
   onInsertElement: (kind: (typeof insertButtons)[number]["kind"]) => void;
   onFormatInline: (action: InlineFormatAction) => void;
+  onLayout: (action: LayoutAction) => void;
 };
 
 export function Inspector({
@@ -116,6 +129,7 @@ export function Inspector({
   onDelete,
   onInsertElement,
   onFormatInline,
+  onLayout,
 }: InspectorProps) {
   const [classDraft, setClassDraft] = useState("");
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
@@ -343,6 +357,20 @@ export function Inspector({
               onChange={(event) => onStyle({ height: event.target.value })}
             />
           </label>
+        </div>
+
+        <div className="align-row" aria-label="Element alignment">
+          {layoutButtons.map(({ label, action, icon: Icon }) => (
+            <button
+              aria-label={label}
+              key={action}
+              onClick={() => onLayout(action)}
+              title={label}
+              type="button"
+            >
+              <Icon size={17} aria-hidden="true" />
+            </button>
+          ))}
         </div>
 
         <div className="nudge-grid" aria-label="Move controls">
