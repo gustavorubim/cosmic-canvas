@@ -90,6 +90,7 @@ export default function App() {
   const lastScrollRef = useRef({ x: 0, y: 0 });
   const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const toastIdRef = useRef(0);
+  const deckHintShownRef = useRef(false);
 
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
   const [appliedHtml, setAppliedHtml] = useState(initialHtml);
@@ -167,7 +168,8 @@ export default function App() {
     if (immediate) {
       post();
     } else {
-      pendingHostChangeTimer.current = window.setTimeout(post, 250);
+      const delay = reason === "input" || reason === "source" ? 1000 : 250;
+      pendingHostChangeTimer.current = window.setTimeout(post, delay);
     }
   }
 
@@ -175,6 +177,7 @@ export default function App() {
     setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
     setDeckSlides([]);
     setActiveSlideId("");
+    deckHintShownRef.current = false;
     setAppliedHtml(html);
     setFrameHtml(prepareEditableHtml(html, trustedScripts));
     setSelected(null);
@@ -434,12 +437,37 @@ export default function App() {
       }
 
       if (data.type === "wysiwyg-selection") {
-        setSelected(data.selected);
+        const active = document.activeElement;
+        const editingInspectorText =
+          active instanceof HTMLElement && Boolean(active.closest(".text-control"));
+        setSelected((current) => {
+          if (
+            editingInspectorText &&
+            current &&
+            data.selected &&
+            current.id === data.selected.id
+          ) {
+            return { ...data.selected, text: current.text };
+          }
+          return data.selected;
+        });
       }
 
       if (data.type === "wysiwyg-deck") {
         setDeckSlides(data.slides);
         setActiveSlideId(data.activeId);
+        if (data.slides.length > 0 && !deckHintShownRef.current) {
+          deckHintShownRef.current = true;
+          showToast("Edit modes type text - use the timeline for slides. Preview runs deck shortcuts.");
+        }
+      }
+
+      if (data.type === "wysiwyg-shortcut") {
+        const actions = actionsRef.current;
+        if (data.action === "save") void actions.saveToFile();
+        if (data.action === "apply-source") actions.applySource();
+        if (data.action === "undo") actions.stepHistory(-1);
+        if (data.action === "redo") actions.stepHistory(1);
       }
 
       if (data.type === "wysiwyg-document-change") {
@@ -448,7 +476,7 @@ export default function App() {
         setSourceHtml(clean);
         setAppliedHtml(clean);
         scheduleHistory(clean);
-        postHostDocumentChange(clean, data.reason);
+        postHostDocumentChange(clean, data.reason, data.reason === "blur");
       }
     }
 
@@ -542,6 +570,17 @@ export default function App() {
     }, 700);
     return () => window.clearTimeout(id);
   }, [sourceHtml, initialHtml]);
+
+  useEffect(() => {
+    if (isVsCode || !sourceDirty) return;
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isVsCode, sourceDirty]);
 
   useEffect(() => {
     if (didLoadUrlRef.current) return;
@@ -652,7 +691,9 @@ export default function App() {
               sandbox={
                 isVsCode
                   ? "allow-scripts allow-downloads"
-                  : "allow-scripts allow-same-origin allow-downloads"
+                  : runTrustedScripts
+                    ? "allow-scripts allow-downloads"
+                    : "allow-scripts allow-same-origin allow-downloads"
               }
               srcDoc={frameHtml}
               title="Editable HTML preview"

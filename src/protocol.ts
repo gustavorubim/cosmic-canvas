@@ -51,6 +51,7 @@ export type BridgeMessage =
   | { type: "wysiwyg-ready"; title: string; bodyTextStart: string }
   | { type: "wysiwyg-selection"; selected: SelectedElement | null }
   | { type: "wysiwyg-deck"; slides: DeckSlide[]; activeId: string }
+  | { type: "wysiwyg-shortcut"; action: "save" | "apply-source" | "undo" | "redo" }
   | {
       type: "wysiwyg-document-change";
       reason: string;
@@ -82,6 +83,7 @@ export const BRIDGE_MESSAGE_TYPES = [
   "wysiwyg-ready",
   "wysiwyg-selection",
   "wysiwyg-deck",
+  "wysiwyg-shortcut",
   "wysiwyg-document-change",
 ] as const;
 
