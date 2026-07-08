@@ -1,4 +1,13 @@
-import { ChevronLeft, ChevronRight, CopyPlus, Layers3, Plus } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  CopyPlus,
+  Layers3,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { type DeckSlide } from "../protocol";
 
 type DeckTimelineProps = {
@@ -9,6 +18,9 @@ type DeckTimelineProps = {
   onStep: (offset: number) => void;
   onDuplicate: () => void;
   onInsert: () => void;
+  onRename: (slide: DeckSlide, title: string) => void;
+  onDelete: () => void;
+  onMove: (offset: number) => void;
 };
 
 export function DeckTimeline({
@@ -19,7 +31,16 @@ export function DeckTimeline({
   onStep,
   onDuplicate,
   onInsert,
+  onRename,
+  onDelete,
+  onMove,
 }: DeckTimelineProps) {
+  function requestRename(slide: DeckSlide) {
+    const title = window.prompt("Rename slide", slide.title);
+    if (title === null) return;
+    onRename(slide, title);
+  }
+
   return (
     <div className="deck-timeline" aria-label="Slide timeline">
       <div className="timeline-header">
@@ -52,6 +73,25 @@ export function DeckTimeline({
           <button onClick={onInsert} title="Insert slide after current" type="button">
             <Plus size={16} aria-hidden="true" />
           </button>
+          <button
+            disabled={activeSlideIndex <= 0}
+            onClick={() => onMove(-1)}
+            title="Move current slide left"
+            type="button"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+          </button>
+          <button
+            disabled={activeSlideIndex >= slides.length - 1}
+            onClick={() => onMove(1)}
+            title="Move current slide right"
+            type="button"
+          >
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+          <button disabled={slides.length <= 1} onClick={onDelete} title="Delete current slide" type="button">
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
         </div>
       </div>
       <div className="slide-strip">
@@ -60,6 +100,7 @@ export function DeckTimeline({
             className={slide.id === activeSlideId ? "is-active" : ""}
             key={slide.id}
             onClick={() => onGoSlide(slide)}
+            onDoubleClick={() => requestRename(slide)}
             title={slide.title}
             type="button"
           >

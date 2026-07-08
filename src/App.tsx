@@ -243,6 +243,25 @@ export default function App() {
     postCommand("insert-slide", { id: slide.id });
   }
 
+  function renameDeckSlide(slide: DeckSlide, title: string) {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) return;
+    postCommand("rename-slide", { id: slide.id, title: cleanTitle });
+  }
+
+  function deleteCurrentSlide() {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    if (!window.confirm(`Delete slide "${slide.title}"?`)) return;
+    postCommand("delete-slide", { id: slide.id });
+  }
+
+  function moveCurrentSlide(offset: number) {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    postCommand("move-slide", { id: slide.id, offset });
+  }
+
   function updateDataCell(rowIndex: number, cellIndex: number, value: string) {
     setDataRows((current) => {
       const next = normalizeDataRows(current).map((row) => [...row]);
@@ -724,6 +743,9 @@ export default function App() {
               onStep={stepDeckSlide}
               onDuplicate={duplicateCurrentSlide}
               onInsert={insertSlideAfterCurrent}
+              onRename={renameDeckSlide}
+              onDelete={deleteCurrentSlide}
+              onMove={moveCurrentSlide}
             />
           ) : null}
         </section>

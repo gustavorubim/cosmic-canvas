@@ -70,6 +70,10 @@ function keydown(win: TestWindow, target: EventTarget, key: string, init: Keyboa
   return event;
 }
 
+function latestDeckMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-deck").at(-1);
+}
+
 function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   target.dispatchEvent(
     new win.MouseEvent("click", {
@@ -342,5 +346,50 @@ describe("deck detection", () => {
       "Vertical Two A",
       "Vertical Two B",
     ]);
+  });
+});
+
+describe("slide management commands", () => {
+  it("renames a slide title and first heading", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+
+    postCommand(win, { command: "rename-slide", id: firstSlide.id, title: "Renamed Slide" });
+
+    const section = win.document.querySelector("section.slide");
+    expect(section?.getAttribute("data-title")).toBe("Renamed Slide");
+    expect(section?.querySelector("h2")?.textContent).toBe("Renamed Slide");
+    expect(latestDeckMessage(messages).slides[0].title).toBe("Renamed Slide");
+  });
+
+  it("moves a slide by offset and republishes deck order", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+
+    postCommand(win, { command: "move-slide", id: firstSlide.id, offset: 1 });
+
+    const titles = Array.from(win.document.querySelectorAll("section.slide > h2")).map(
+      (heading) => heading.textContent,
+    );
+    expect(titles).toEqual(["Slide Two", "Slide One", "Slide Three"]);
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Two",
+      "One",
+      "Three",
+    ]);
+  });
+
+  it("deletes a slide and activates a neighbor", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+
+    postCommand(win, { command: "delete-slide", id: firstSlide.id });
+
+    expect(win.document.querySelectorAll("section.slide")).toHaveLength(2);
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Two",
+      "Three",
+    ]);
+    expect(win.document.querySelector("section.slide")?.getAttribute("data-wysiwyg-current-slide")).toBe("true");
   });
 });

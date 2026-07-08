@@ -683,6 +683,14 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     publishDeck();
   }
 
+  function slideFromPayload(payload: Record<string, unknown>) {
+    const slides = slideCandidates();
+    const slide = payload?.id
+      ? slides.find((candidate) => ensureId(candidate) === payload.id)
+      : nearestSlide(slides);
+    return { slides, slide };
+  }
+
   function clearEditorState(element: Element) {
     element.removeAttribute("data-wysiwyg-current-slide");
     element.removeAttribute("data-wysiwyg-selected");
@@ -737,10 +745,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function insertSlide(payload: Record<string, unknown>) {
-    const slides = slideCandidates();
-    const slide = payload?.id
-      ? slides.find((candidate) => ensureId(candidate) === payload.id)
-      : nearestSlide(slides);
+    const { slide } = slideFromPayload(payload);
     if (!slide || !slide.parentElement) return;
     const clone = slide.cloneNode(true) as Element;
     prepareNewSlide(clone);
@@ -749,6 +754,64 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     markActiveSlide(clone);
     clone.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
     publishChange("insert-slide");
+  }
+
+  function renameSlide(payload: Record<string, unknown>) {
+    const { slide } = slideFromPayload(payload);
+    const title = String(payload.title || "").trim();
+    if (!slide || !title) return;
+    slide.setAttribute("data-title", title);
+    const heading = slide.querySelector("h1, h2, h3");
+    if (heading) {
+      heading.textContent = title;
+    } else {
+      const fallbackHeading = document.createElement("h2");
+      fallbackHeading.textContent = title;
+      slide.prepend(fallbackHeading);
+    }
+    markActiveSlide(slide);
+    publishChange("rename-slide");
+    publishDeck();
+  }
+
+  function deleteSlide(payload: Record<string, unknown>) {
+    const { slides, slide } = slideFromPayload(payload);
+    if (!slide || !slide.parentElement) return;
+    const index = slides.indexOf(slide);
+    const next = slides[index + 1] || slides[index - 1] || null;
+    if (selectedElement && slide.contains(selectedElement)) {
+      selectedElement.removeAttribute("data-wysiwyg-selected");
+      restoreContentEditable(selectedElement);
+      selectedElement = null;
+    }
+    slide.remove();
+    if (next && document.body.contains(next)) {
+      markActiveSlide(next);
+      next.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    } else {
+      activeSlideId = "";
+    }
+    publishChange("delete-slide");
+    publishDeck();
+  }
+
+  function moveSlide(payload: Record<string, unknown>) {
+    const { slides, slide } = slideFromPayload(payload);
+    const offset = Math.trunc(Number(payload.offset || 0));
+    if (!slide || !slide.parentElement || offset === 0) return;
+    const currentIndex = slides.indexOf(slide);
+    const targetIndex = currentIndex + offset;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= slides.length) return;
+    const target = slides[targetIndex];
+    if (offset > 0) {
+      target.after(slide);
+    } else {
+      target.before(slide);
+    }
+    markActiveSlide(slide);
+    slide.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("move-slide");
+    publishDeck();
   }
 
   function ensureDataTableStyle() {
@@ -1063,6 +1126,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);
+    if (data.command === "rename-slide") renameSlide(data);
+    if (data.command === "delete-slide") deleteSlide(data);
+    if (data.command === "move-slide") moveSlide(data);
     if (data.command === "insert-table") insertDataTable(data);
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);

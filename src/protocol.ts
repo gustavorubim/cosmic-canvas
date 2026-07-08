@@ -73,6 +73,9 @@ export type BridgeCommand =
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }
   | { command: "insert-slide"; id: string }
+  | { command: "rename-slide"; id: string; title: string }
+  | { command: "delete-slide"; id: string }
+  | { command: "move-slide"; id: string; offset: number }
   | { command: "insert-table"; columns: string[]; rows: string[][]; title: string }
   | { command: "go-slide"; id: string }
   | { command: "nudge"; dx: number; dy: number }
