@@ -171,7 +171,7 @@ const EDITOR_STYLE = `
 
   .wysiwyg-chip > span {
     margin-right: 5px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
   }
 
   .wysiwyg-chip button {

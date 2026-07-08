@@ -718,7 +718,11 @@ export default function App() {
           onApply={applySource}
         />
 
-        <section className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`} aria-label="Rendered HTML">
+        <section
+          aria-label="Rendered HTML"
+          className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`}
+          data-mode={mode}
+        >
           <div className="pane-title">
             <span className="pane-title-left">
               Canvas
