@@ -792,6 +792,41 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     publishChange("background");
   }
 
+  function setThemeFont(fontFamily: unknown) {
+    const family = String(fontFamily || "").trim();
+    if (!family) return;
+    document.documentElement.style.fontFamily = family;
+    publishChange("theme-font");
+  }
+
+  function swapStyleAttribute(element: Element, from: string, to: string) {
+    const raw = element.getAttribute("style");
+    if (!raw || !raw.includes(from)) return false;
+    element.setAttribute("style", raw.split(from).join(to));
+    return true;
+  }
+
+  function swapThemeColor(fromValue: unknown, toValue: unknown) {
+    const from = String(fromValue || "").trim();
+    const to = String(toValue || "").trim();
+    if (!from || !to || from === to) return;
+    let changed = false;
+    [document.documentElement, document.body, ...Array.from(document.querySelectorAll<HTMLElement>("[style]"))].forEach(
+      (element) => {
+        changed = swapStyleAttribute(element, from, to) || changed;
+      },
+    );
+    if (changed) publishChange("theme-color");
+  }
+
+  function setSlideBackground(colorValue: unknown) {
+    const color = String(colorValue || "").trim();
+    if (!color) return;
+    const target = backgroundTarget();
+    target.style.backgroundColor = color;
+    publishChange("slide-background");
+  }
+
   function duplicateSelected() {
     if (!selectedElement || !selectedElement.parentElement || selectedElement === document.body) return;
     const clone = selectedElement.cloneNode(true) as Element;
@@ -1750,6 +1785,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "replace-image") replaceImage(data.src, data.alt);
     if (data.command === "set-image-fit") setImageFit(data.fit);
     if (data.command === "replace-background") replaceBackground(data.src);
+    if (data.command === "set-theme-font") setThemeFont(data.fontFamily);
+    if (data.command === "swap-theme-color") swapThemeColor(data.from, data.to);
+    if (data.command === "set-slide-background") setSlideBackground(data.color);
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);

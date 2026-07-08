@@ -720,6 +720,40 @@ describe("image and background controls", () => {
   });
 });
 
+describe("theme controls", () => {
+  it("sets the root font and swaps exact inline palette values", () => {
+    const { win } = createWindow(`
+      <!doctype html><html style="--brand: #111111; color: #111111"><head><title>Theme</title></head><body>
+        <section class="slide" data-title="Theme" style="border-color: #111111; outline-color: #333333">
+          <p id="copy" style="color: #111111">Copy</p>
+        </section>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    postCommand(win, { command: "set-theme-font", fontFamily: "Georgia, serif" });
+    expect(win.document.documentElement.style.fontFamily).toBe("Georgia, serif");
+
+    postCommand(win, { command: "swap-theme-color", from: "#111111", to: "#2266aa" });
+
+    expect(win.document.documentElement.getAttribute("style")).toContain("#2266aa");
+    expect(win.document.querySelector("section.slide")?.getAttribute("style")).toContain("#2266aa");
+    expect(win.document.getElementById("copy")?.getAttribute("style")).toContain("#2266aa");
+    expect(win.document.querySelector("section.slide")?.getAttribute("style")).toContain("#333333");
+  });
+
+  it("sets the current slide background color", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+    postCommand(win, { command: "select", id: firstSlide.id });
+    postCommand(win, { command: "set-slide-background", color: "#123456" });
+
+    const slide = win.document.querySelector("section.slide") as HTMLElement;
+    expect(slide.style.backgroundColor).toBe("rgb(18, 52, 86)");
+  });
+});
+
 describe("validation audit", () => {
   it("reports document quality findings with selectable element ids", () => {
     const { win, messages } = createWindow(`

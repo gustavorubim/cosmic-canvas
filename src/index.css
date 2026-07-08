@@ -801,10 +801,26 @@ button:disabled {
 }
 
 .class-editor,
-.image-editor {
+.image-editor,
+.theme-editor {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+.theme-colors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.theme-action {
+  min-height: 36px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-weight: 700;
 }
 
 .class-chips {

@@ -95,6 +95,9 @@ export type BridgeCommand =
   | { command: "replace-image"; src: string; alt?: string }
   | { command: "set-image-fit"; fit: ImageFitMode }
   | { command: "replace-background"; src: string }
+  | { command: "set-theme-font"; fontFamily: string }
+  | { command: "swap-theme-color"; from: string; to: string }
+  | { command: "set-slide-background"; color: string }
   | { command: "duplicate" }
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }

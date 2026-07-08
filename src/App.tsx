@@ -340,6 +340,18 @@ export default function App() {
     postCommand("replace-background", { src });
   }
 
+  function updateThemeFont(fontFamily: string) {
+    postCommand("set-theme-font", { fontFamily });
+  }
+
+  function swapThemeColor(from: string, to: string) {
+    postCommand("swap-theme-color", { from, to });
+  }
+
+  function updateSlideBackground(color: string) {
+    postCommand("set-slide-background", { color });
+  }
+
   function stepHistory(offset: number) {
     const current = historyRef.current;
     const nextIndex = current.index + offset;
@@ -855,6 +867,9 @@ export default function App() {
               onReplaceImage={(src, alt) => postCommand("replace-image", { src, alt })}
               onImageFit={updateImageFit}
               onReplaceBackground={updateBackground}
+              onThemeFont={updateThemeFont}
+              onPaletteSwap={swapThemeColor}
+              onSlideBackground={updateSlideBackground}
               onNudge={(dx, dy) => postCommand("nudge", { dx, dy })}
               onDuplicate={() => postCommand("duplicate")}
               onDelete={() => postCommand("delete")}

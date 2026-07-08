@@ -121,6 +121,9 @@ type InspectorProps = {
   onReplaceImage: (src: string, alt?: string) => void;
   onImageFit: (fit: ImageFitMode) => void;
   onReplaceBackground: (src: string) => void;
+  onThemeFont: (fontFamily: string) => void;
+  onPaletteSwap: (from: string, to: string) => void;
+  onSlideBackground: (color: string) => void;
   onNudge: (dx: number, dy: number) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -139,6 +142,9 @@ export function Inspector({
   onReplaceImage,
   onImageFit,
   onReplaceBackground,
+  onThemeFont,
+  onPaletteSwap,
+  onSlideBackground,
   onNudge,
   onDuplicate,
   onDelete,
@@ -150,11 +156,19 @@ export function Inspector({
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
   const [imageAlt, setImageAlt] = useState(selected.imageAlt);
   const [backgroundUrl, setBackgroundUrl] = useState(selected.backgroundImage);
+  const [themeFont, setThemeFont] = useState("");
+  const [paletteFrom, setPaletteFrom] = useState(selected.styles.color || "#1f2933");
+  const [paletteTo, setPaletteTo] = useState("#0f766e");
+  const [slideBackground, setSlideBackground] = useState(selected.styles.backgroundColor || "#ffffff");
   const imageFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setImageUrl(selected.imageSrc), [selected.id, selected.imageSrc]);
   useEffect(() => setImageAlt(selected.imageAlt), [selected.id, selected.imageAlt]);
   useEffect(() => setBackgroundUrl(selected.backgroundImage), [selected.id, selected.backgroundImage]);
+  useEffect(() => setSlideBackground(selected.styles.backgroundColor || "#ffffff"), [
+    selected.id,
+    selected.styles.backgroundColor,
+  ]);
 
   function submitClass() {
     const name = classDraft.trim();
@@ -331,6 +345,45 @@ export function Inspector({
           </div>
         </details>
       ) : null}
+
+      <details className="inspector-group">
+        <summary>Theme</summary>
+        <div className="theme-editor">
+          <div className="image-row">
+            <input
+              aria-label="Theme font family"
+              placeholder="Inter, system-ui, sans-serif"
+              value={themeFont}
+              onChange={(event) => setThemeFont(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && onThemeFont(themeFont)}
+            />
+            <button onClick={() => onThemeFont(themeFont)} title="Apply theme font" type="button">
+              Set
+            </button>
+          </div>
+          <div className="theme-colors">
+            <ColorField
+              label="Replace"
+              value={paletteFrom}
+              swatchFallback="#1f2933"
+              onChange={setPaletteFrom}
+            />
+            <ColorField label="With" value={paletteTo} swatchFallback="#0f766e" onChange={setPaletteTo} />
+          </div>
+          <button className="theme-action" onClick={() => onPaletteSwap(paletteFrom, paletteTo)} type="button">
+            Swap colors
+          </button>
+          <ColorField
+            label="Slide fill"
+            value={slideBackground}
+            swatchFallback="#ffffff"
+            onChange={setSlideBackground}
+          />
+          <button className="theme-action" onClick={() => onSlideBackground(slideBackground)} type="button">
+            Set slide fill
+          </button>
+        </div>
+      </details>
 
       <details className="inspector-group" open>
         <summary>Style</summary>
