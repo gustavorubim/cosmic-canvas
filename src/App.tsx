@@ -798,6 +798,7 @@ export default function App() {
               onNudge={(dx, dy) => postCommand("nudge", { dx, dy })}
               onDuplicate={() => postCommand("duplicate")}
               onDelete={() => postCommand("delete")}
+              onInsertElement={(kind) => postCommand("insert-element", { kind })}
             />
           ) : (
             <InspectorEmpty />

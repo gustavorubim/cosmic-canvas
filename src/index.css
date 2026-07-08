@@ -804,6 +804,27 @@ button:disabled {
   font-weight: 700;
 }
 
+.insert-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.insert-grid button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-weight: 700;
+}
+
 .image-upload {
   display: inline-flex;
   align-items: center;

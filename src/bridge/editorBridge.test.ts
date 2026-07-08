@@ -393,3 +393,29 @@ describe("slide management commands", () => {
     expect(win.document.querySelector("section.slide")?.getAttribute("data-wysiwyg-current-slide")).toBe("true");
   });
 });
+
+describe("element insertion commands", () => {
+  it.each([
+    ["heading", "h2", "New heading"],
+    ["paragraph", "p", "Add your text here."],
+    ["image", "img", null],
+    ["button", "button", "Button"],
+    ["box", "div", "New box"],
+  ])("inserts a %s primitive into the current slide", (kind, selector, text) => {
+    const { win, messages } = installBridgeWithHostileDeck();
+
+    postCommand(win, { command: "insert-element", kind });
+
+    const inserted = win.document.querySelector("[data-wysiwyg-selected]");
+    expect(inserted).toBeTruthy();
+    expect(inserted?.matches(selector)).toBe(true);
+    if (text !== null) expect(inserted?.textContent).toBe(text);
+    expect(inserted?.getAttribute("data-wysiwyg-selected")).toBe("true");
+    expect(messages.some((message) => message.type === "wysiwyg-document-change" && message.reason === "insert-element")).toBe(
+      true,
+    );
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).not.toContain("data-wysiwyg-");
+    expect(cleaned).toContain(text ?? "Placeholder image");
+  });
+});

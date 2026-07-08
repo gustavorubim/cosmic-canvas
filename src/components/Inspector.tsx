@@ -4,10 +4,13 @@ import {
   AlignRight,
   CopyPlus,
   CornerLeftUp,
+  Heading2,
   ImageUp,
   MousePointer2,
   Plus,
+  Square,
   Trash2,
+  Type,
   X,
 } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
@@ -18,6 +21,14 @@ const alignButtons = [
   { label: "Center", value: "center", icon: AlignCenter },
   { label: "Right", value: "right", icon: AlignRight },
 ];
+
+const insertButtons = [
+  { kind: "heading", label: "Heading", icon: Heading2 },
+  { kind: "paragraph", label: "Text", icon: Type },
+  { kind: "image", label: "Image", icon: ImageUp },
+  { kind: "button", label: "Button", icon: MousePointer2 },
+  { kind: "box", label: "Box", icon: Square },
+] as const;
 
 function numberFromCss(value: string, fallback = "") {
   const match = value.match(/-?\d+(\.\d+)?/);
@@ -75,6 +86,7 @@ type InspectorProps = {
   onNudge: (dx: number, dy: number) => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onInsertElement: (kind: (typeof insertButtons)[number]["kind"]) => void;
 };
 
 export function Inspector({
@@ -88,6 +100,7 @@ export function Inspector({
   onNudge,
   onDuplicate,
   onDelete,
+  onInsertElement,
 }: InspectorProps) {
   const [classDraft, setClassDraft] = useState("");
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
@@ -142,6 +155,18 @@ export function Inspector({
             </div>
           )}
         </label>
+      </details>
+
+      <details className="inspector-group" open>
+        <summary>Insert</summary>
+        <div className="insert-grid" aria-label="Insert element">
+          {insertButtons.map(({ kind, label, icon: Icon }) => (
+            <button key={kind} onClick={() => onInsertElement(kind)} title={`Insert ${label}`} type="button">
+              <Icon size={15} aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
       </details>
 
       <details className="inspector-group" open>

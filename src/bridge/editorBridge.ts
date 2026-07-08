@@ -852,6 +852,84 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return { element: document.body, placement: "append" };
   }
 
+  function elementInsertionPoint() {
+    if (selectedElement && selectedElement !== document.body && selectedElement.parentElement) {
+      if (selectedElement.closest(SLIDE_SELECTOR)) {
+        return { element: selectedElement, placement: "after" };
+      }
+      if (selectedElement === nearestSlide(slideCandidates())) {
+        return { element: selectedElement, placement: "append" };
+      }
+      return { element: selectedElement, placement: "after" };
+    }
+    const slide = nearestSlide(slideCandidates());
+    if (slide) return { element: slide, placement: "append" };
+    return { element: document.body, placement: "append" };
+  }
+
+  function placeholderImageSrc() {
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">',
+      '<rect width="960" height="540" rx="24" fill="#eef2f7"/>',
+      '<path d="M160 380l180-180 120 120 90-90 250 250H160z" fill="#cbd5e1"/>',
+      '<circle cx="690" cy="155" r="54" fill="#94a3b8"/>',
+      '<text x="480" y="485" text-anchor="middle" font-family="Arial,sans-serif" font-size="36" fill="#475569">Image</text>',
+      "</svg>",
+    ].join("");
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function createInsertedElement(kind: unknown) {
+    const normalizedKind = String(kind || "").trim();
+    if (normalizedKind === "heading") {
+      const heading = document.createElement("h2");
+      heading.textContent = "New heading";
+      return heading;
+    }
+    if (normalizedKind === "paragraph") {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = "Add your text here.";
+      return paragraph;
+    }
+    if (normalizedKind === "image") {
+      const image = document.createElement("img");
+      image.src = placeholderImageSrc();
+      image.alt = "Placeholder image";
+      image.style.maxWidth = "100%";
+      image.style.height = "auto";
+      return image;
+    }
+    if (normalizedKind === "button") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Button";
+      return button;
+    }
+    if (normalizedKind === "box") {
+      const box = document.createElement("div");
+      box.textContent = "New box";
+      box.style.padding = "24px";
+      box.style.border = "1px solid #cbd2d9";
+      box.style.borderRadius = "8px";
+      return box;
+    }
+    return null;
+  }
+
+  function insertElement(payload: Record<string, unknown>) {
+    const element = createInsertedElement(payload.kind);
+    if (!element) return;
+    const insertion = elementInsertionPoint();
+    if (insertion.placement === "after") {
+      insertion.element.after(element);
+    } else {
+      insertion.element.append(element);
+    }
+    selectElement(element);
+    element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("insert-element");
+  }
+
   function insertDataTable(payload: Record<string, unknown>) {
     let columns = payloadCells(payload?.columns);
     const rows = Array.isArray(payload?.rows)
@@ -1129,6 +1207,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "rename-slide") renameSlide(data);
     if (data.command === "delete-slide") deleteSlide(data);
     if (data.command === "move-slide") moveSlide(data);
+    if (data.command === "insert-element") insertElement(data);
     if (data.command === "insert-table") insertDataTable(data);
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);
