@@ -7,6 +7,7 @@
 
 export type EditorMode = "text" | "select" | "move" | "preview";
 export type Viewport = "desktop" | "tablet" | "mobile";
+export type InlineFormatAction = "bold" | "italic" | "create-link" | "remove-link" | "toggle-list";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -86,6 +87,11 @@ export type BridgeCommand =
   | { command: "delete-slide"; id: string }
   | { command: "move-slide"; id: string; offset: number }
   | { command: "insert-element"; kind: "heading" | "paragraph" | "image" | "button" | "box" }
+  | {
+      command: "format-inline";
+      action: InlineFormatAction;
+      href?: string;
+    }
   | { command: "insert-table"; columns: string[]; rows: string[][]; title: string }
   | { command: "go-slide"; id: string }
   | { command: "nudge"; dx: number; dy: number }

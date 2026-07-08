@@ -90,6 +90,7 @@ button:disabled {
 .segmented,
 .icon-group,
 .align-row,
+.rich-text-row,
 .inspector-actions {
   display: flex;
   align-items: center;
@@ -110,6 +111,7 @@ button:disabled {
 .segmented button,
 .icon-group button,
 .align-row button,
+.rich-text-row button,
 .inspector-actions button,
 .nudge-grid button,
 .panel-tabs button,
@@ -588,6 +590,26 @@ button:disabled {
 .align-row {
   width: max-content;
   margin-top: 12px;
+}
+
+.rich-text-row {
+  width: max-content;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.rich-text-row button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+}
+
+.rich-text-row button:disabled {
+  color: #9aa7b4;
+  background: #f1f4f8;
+  cursor: not-allowed;
 }
 
 .nudge-grid {

@@ -1059,6 +1059,183 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return true;
   }
 
+  function nodeWithin(node: Node, root: Element) {
+    if (node === root) return true;
+    const element = node.nodeType === win.Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    return Boolean(element && (element === root || root.contains(element)));
+  }
+
+  function selectionRangeInsideSelected(fallback: "contents" | "end") {
+    if (!selectedElement || !canDirectlyEditTextElement(selectedElement)) return null;
+    const root = selectedElement;
+    const selection = win.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const current = selection.getRangeAt(0);
+      if (nodeWithin(current.startContainer, root) && nodeWithin(current.endContainer, root)) {
+        if (!current.collapsed || fallback === "end") return { root, range: current, selection };
+      }
+    }
+
+    const range = document.createRange();
+    if (fallback === "end") {
+      range.selectNodeContents(root);
+      range.collapse(false);
+    } else {
+      range.selectNodeContents(root);
+    }
+    return { root, range, selection };
+  }
+
+  function selectRange(range: Range) {
+    const selection = win.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function closestTagFromNode(node: Node, tagName: string, root: Element) {
+    let element = node.nodeType === win.Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    while (element && element !== root) {
+      if (element.tagName.toLowerCase() === tagName) return element;
+      element = element.parentElement;
+    }
+    return null;
+  }
+
+  function unwrapElement(element: Element) {
+    const parent = element.parentNode;
+    if (!parent) return false;
+    const range = document.createRange();
+    range.setStartBefore(element);
+    while (element.firstChild) parent.insertBefore(element.firstChild, element);
+    range.setEndBefore(element);
+    element.remove();
+    selectRange(range);
+    return true;
+  }
+
+  function wrapRangeWithTag(range: Range, tagName: string, attributes: Record<string, string> = {}) {
+    const wrapper = document.createElement(tagName);
+    Object.entries(attributes).forEach(([key, value]) => wrapper.setAttribute(key, value));
+    const fragment = range.extractContents();
+    wrapper.append(fragment);
+    if (!wrapper.textContent && !wrapper.querySelector("img, br")) return null;
+    range.insertNode(wrapper);
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(wrapper);
+    selectRange(nextRange);
+    return wrapper;
+  }
+
+  function toggleInlineTag(tagName: "strong" | "em") {
+    const current = selectionRangeInsideSelected("contents");
+    if (!current) return false;
+    const { root, range } = current;
+    const startTag = closestTagFromNode(range.startContainer, tagName, root);
+    const endTag = closestTagFromNode(range.endContainer, tagName, root);
+    if (startTag && startTag === endTag) return unwrapElement(startTag);
+    return Boolean(wrapRangeWithTag(range, tagName));
+  }
+
+  function safeHref(raw: unknown) {
+    const href = String(raw || "").trim();
+    if (!href) return "";
+    const compact = href.replace(/[\u0000-\u001f\u007f\s]+/g, "").toLowerCase();
+    if (compact.startsWith("javascript:")) return "";
+    return href;
+  }
+
+  function createOrUpdateLink(hrefValue: unknown) {
+    const href = safeHref(hrefValue);
+    if (!href) return false;
+    const current = selectionRangeInsideSelected("contents");
+    if (!current) return false;
+    const { root, range } = current;
+    const startLink = closestTagFromNode(range.startContainer, "a", root);
+    const endLink = closestTagFromNode(range.endContainer, "a", root);
+    if (startLink && startLink === endLink) {
+      startLink.setAttribute("href", href);
+      return true;
+    }
+    return Boolean(wrapRangeWithTag(range, "a", { href }));
+  }
+
+  function removeLink() {
+    if (!selectedElement) return false;
+    const current = selectionRangeInsideSelected("contents");
+    if (!current) return false;
+    const { root, range } = current;
+    const startLink = closestTagFromNode(range.startContainer, "a", root);
+    const endLink = closestTagFromNode(range.endContainer, "a", root);
+    if (startLink && startLink === endLink) return unwrapElement(startLink);
+    const links = Array.from(root.querySelectorAll("a"));
+    let changed = false;
+    links.forEach((link) => {
+      if (range.intersectsNode(link)) changed = unwrapElement(link) || changed;
+    });
+    return changed;
+  }
+
+  function listForSelectedElement() {
+    if (!selectedElement) return null;
+    if (selectedElement.matches("ul, ol")) return selectedElement;
+    const parent = selectedElement.parentElement;
+    if (selectedElement.tagName.toLowerCase() === "li" && parent?.matches("ul, ol")) return parent;
+    return null;
+  }
+
+  function unwrapList(list: Element) {
+    const replacements: Element[] = [];
+    Array.from(list.children).forEach((child) => {
+      if (child.tagName.toLowerCase() !== "li") return;
+      const paragraph = document.createElement("p");
+      while (child.firstChild) paragraph.append(child.firstChild);
+      if (!paragraph.textContent && !paragraph.querySelector("img, br")) paragraph.append(document.createElement("br"));
+      replacements.push(paragraph);
+    });
+    if (!replacements.length) return false;
+    list.replaceWith(...replacements);
+    selectElement(replacements[0]);
+    return true;
+  }
+
+  function toggleList() {
+    if (!selectedElement || selectedElement === document.body) return false;
+    const existingList = listForSelectedElement();
+    if (existingList) return unwrapList(existingList);
+    if (!canDirectlyEditTextElement(selectedElement)) return false;
+    const list = document.createElement("ul");
+    const item = document.createElement("li");
+    while (selectedElement.firstChild) item.append(selectedElement.firstChild);
+    if (!item.textContent && !item.querySelector("img, br")) item.append(document.createElement("br"));
+    list.append(item);
+    selectedElement.replaceWith(list);
+    selectElement(item);
+    return true;
+  }
+
+  function formatInline(payload: Record<string, unknown>) {
+    let changed = false;
+    if (payload.action === "bold") changed = toggleInlineTag("strong");
+    if (payload.action === "italic") changed = toggleInlineTag("em");
+    if (payload.action === "create-link") changed = createOrUpdateLink(payload.href);
+    if (payload.action === "remove-link") changed = removeLink();
+    if (payload.action === "toggle-list") changed = toggleList();
+    if (changed) publishChange("format-inline");
+  }
+
+  function insertLineBreakAtSelection() {
+    const current = selectionRangeInsideSelected("end");
+    if (!current) return false;
+    const { range } = current;
+    range.deleteContents();
+    const br = document.createElement("br");
+    range.insertNode(br);
+    range.setStartAfter(br);
+    range.collapse(true);
+    selectRange(range);
+    return true;
+  }
+
   function handleEditorKey(event: KeyboardEvent, context: EditorKeyContext) {
     if (mode === "preview" || !selectedElement) return false;
 
@@ -1069,6 +1246,12 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       } else {
         clearSelection();
       }
+      return true;
+    }
+
+    if (context.typing && event.key === "Enter") {
+      event.preventDefault();
+      if (insertLineBreakAtSelection()) publishChange("line-break");
       return true;
     }
 
@@ -1277,6 +1460,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "delete-slide") deleteSlide(data);
     if (data.command === "move-slide") moveSlide(data);
     if (data.command === "insert-element") insertElement(data);
+    if (data.command === "format-inline") formatInline(data);
     if (data.command === "insert-table") insertDataTable(data);
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);

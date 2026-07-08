@@ -2,19 +2,24 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Bold,
   CopyPlus,
   CornerLeftUp,
   Heading2,
   ImageUp,
+  Italic,
+  Link,
+  List,
   MousePointer2,
   Plus,
   Square,
   Trash2,
   Type,
+  Unlink,
   X,
 } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { type SelectedElement } from "../protocol";
+import { type InlineFormatAction, type SelectedElement } from "../protocol";
 
 const alignButtons = [
   { label: "Left", value: "left", icon: AlignLeft },
@@ -28,6 +33,14 @@ const insertButtons = [
   { kind: "image", label: "Image", icon: ImageUp },
   { kind: "button", label: "Button", icon: MousePointer2 },
   { kind: "box", label: "Box", icon: Square },
+] as const;
+
+const richTextButtons = [
+  { action: "bold", label: "Bold", icon: Bold },
+  { action: "italic", label: "Italic", icon: Italic },
+  { action: "create-link", label: "Link", icon: Link },
+  { action: "remove-link", label: "Unlink", icon: Unlink },
+  { action: "toggle-list", label: "List", icon: List },
 ] as const;
 
 function numberFromCss(value: string, fallback = "") {
@@ -87,6 +100,7 @@ type InspectorProps = {
   onDuplicate: () => void;
   onDelete: () => void;
   onInsertElement: (kind: (typeof insertButtons)[number]["kind"]) => void;
+  onFormatInline: (action: InlineFormatAction) => void;
 };
 
 export function Inspector({
@@ -101,6 +115,7 @@ export function Inspector({
   onDuplicate,
   onDelete,
   onInsertElement,
+  onFormatInline,
 }: InspectorProps) {
   const [classDraft, setClassDraft] = useState("");
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
@@ -155,6 +170,20 @@ export function Inspector({
             </div>
           )}
         </label>
+        <div className="rich-text-row" aria-label="Rich text controls">
+          {richTextButtons.map(({ action, label, icon: Icon }) => (
+            <button
+              aria-label={label}
+              disabled={!selected.editableText && action !== "toggle-list"}
+              key={action}
+              onClick={() => onFormatInline(action)}
+              title={label}
+              type="button"
+            >
+              <Icon size={16} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
       </details>
 
       <details className="inspector-group" open>

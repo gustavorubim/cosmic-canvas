@@ -19,6 +19,7 @@ import {
   type EditorMode,
   isBridgeMessage,
   type AuditFinding,
+  type InlineFormatAction,
   type SelectedElement,
   type Viewport,
 } from "./protocol";
@@ -306,6 +307,16 @@ export default function App() {
   function updateSelectedText(text: string) {
     setSelected((current) => (current ? { ...current, text } : current));
     postCommand("set-text", { text });
+  }
+
+  function formatInline(action: InlineFormatAction) {
+    if (action === "create-link") {
+      const href = window.prompt("Link URL", "https://");
+      if (href === null) return;
+      postCommand("format-inline", { action, href });
+      return;
+    }
+    postCommand("format-inline", { action });
   }
 
   function stepHistory(offset: number) {
@@ -820,6 +831,7 @@ export default function App() {
               onDuplicate={() => postCommand("duplicate")}
               onDelete={() => postCommand("delete")}
               onInsertElement={(kind) => postCommand("insert-element", { kind })}
+              onFormatInline={formatInline}
             />
           ) : (
             <InspectorEmpty />

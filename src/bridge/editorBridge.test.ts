@@ -90,6 +90,26 @@ function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   );
 }
 
+function selectSubstring(win: TestWindow, root: Element, text: string) {
+  const walker = win.document.createTreeWalker(root, win.NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const value = node.textContent || "";
+    const index = value.indexOf(text);
+    if (index >= 0) {
+      const range = win.document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + text.length);
+      const selection = win.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return range;
+    }
+    node = walker.nextNode();
+  }
+  throw new Error(`Unable to select substring: ${text}`);
+}
+
 describe("bridge helpers", () => {
   it("detects typing contexts across contenteditable and form controls", () => {
     const { win } = createWindow(`
@@ -309,6 +329,110 @@ describe("editing polish", () => {
     expect(paragraph.textContent).toContain("Pasted rich text");
     expect(paragraph.innerHTML).not.toContain("span");
     expect(paragraph.innerHTML).not.toContain("color:red");
+  });
+});
+
+describe("rich text editing commands", () => {
+  it("wraps and unwraps selected text with semantic inline tags", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    click(win, paragraph);
+
+    selectSubstring(win, paragraph, "Alpha");
+    postCommand(win, { command: "format-inline", action: "bold" });
+
+    const strong = paragraph.querySelector("strong");
+    expect(strong?.textContent).toBe("Alpha");
+
+    selectSubstring(win, paragraph, "Alpha");
+    postCommand(win, { command: "format-inline", action: "bold" });
+
+    expect(paragraph.querySelector("strong")).toBeNull();
+
+    selectSubstring(win, paragraph, "bravo");
+    postCommand(win, { command: "format-inline", action: "italic" });
+
+    expect(paragraph.querySelector("em")?.textContent).toBe("bravo");
+  });
+
+  it("creates, edits, removes, and validates links", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    click(win, paragraph);
+
+    selectSubstring(win, paragraph, "bravo");
+    postCommand(win, { command: "format-inline", action: "create-link", href: "javascript:alert(1)" });
+    expect(paragraph.querySelector("a")).toBeNull();
+
+    postCommand(win, { command: "format-inline", action: "create-link", href: "https://example.com/demo" });
+    const link = paragraph.querySelector("a");
+    expect(link?.textContent).toBe("bravo");
+    expect(link?.getAttribute("href")).toBe("https://example.com/demo");
+
+    selectSubstring(win, paragraph, "bravo");
+    postCommand(win, { command: "format-inline", action: "create-link", href: "/updated" });
+    expect(paragraph.querySelector("a")?.getAttribute("href")).toBe("/updated");
+
+    selectSubstring(win, paragraph, "bravo");
+    postCommand(win, { command: "format-inline", action: "remove-link" });
+    expect(paragraph.querySelector("a")).toBeNull();
+  });
+
+  it("uses Enter as a line break inside editable text", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    click(win, paragraph);
+
+    const text = paragraph.firstChild as Text;
+    const range = win.document.createRange();
+    range.setStart(text, "Alpha".length);
+    range.collapse(true);
+    const selection = win.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const enter = keydown(win, paragraph, "Enter");
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(paragraph.querySelectorAll("br")).toHaveLength(1);
+    expect(paragraph.querySelector("div, p")).toBeNull();
+  });
+
+  it("toggles a text element into a list and back", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    click(win, paragraph);
+
+    postCommand(win, { command: "format-inline", action: "toggle-list" });
+
+    const list = win.document.querySelector("section.slide ul");
+    const item = list?.querySelector("li");
+    expect(item?.textContent).toBe("Alpha bravo charlie");
+    expect(item?.getAttribute("data-wysiwyg-selected")).toBe("true");
+
+    postCommand(win, { command: "format-inline", action: "toggle-list" });
+
+    const restored = win.document.querySelector("section.slide p");
+    expect(win.document.querySelector("section.slide ul")).toBeNull();
+    expect(restored?.textContent).toBe("Alpha bravo charlie");
+  });
+
+  it("round-trips inline markup through clean export", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    click(win, paragraph);
+
+    selectSubstring(win, paragraph, "Alpha");
+    postCommand(win, { command: "format-inline", action: "bold" });
+    selectSubstring(win, paragraph, "charlie");
+    postCommand(win, { command: "format-inline", action: "create-link", href: "https://example.com/charlie" });
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+
+    expect(cleaned).toContain("<strong>Alpha</strong>");
+    expect(cleaned).toContain('<a href="https://example.com/charlie">charlie</a>');
+    expect(cleaned).not.toContain("data-wysiwyg-");
+    expect(cleaned).not.toContain("contenteditable");
   });
 });
 
