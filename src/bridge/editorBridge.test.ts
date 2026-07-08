@@ -74,6 +74,10 @@ function latestDeckMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-deck").at(-1);
 }
 
+function latestAuditMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-audit").at(-1);
+}
+
 function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   target.dispatchEvent(
     new win.MouseEvent("click", {
@@ -417,5 +421,47 @@ describe("element insertion commands", () => {
     const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
     expect(cleaned).not.toContain("data-wysiwyg-");
     expect(cleaned).toContain(text ?? "Placeholder image");
+  });
+});
+
+describe("validation audit", () => {
+  it("reports document quality findings with selectable element ids", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><head><title>Audit</title></head><body>
+        <img id="broken" src="" />
+        <p id="tiny" style="font-size: 10px">Small</p>
+        <div id="overflow">Overflow</div>
+        <script data-wysiwyg-preserved-script="true" type="text/plain">console.log("x")</script>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    const overflow = win.document.getElementById("overflow") as HTMLElement;
+    Object.defineProperty(overflow, "scrollWidth", { configurable: true, value: 120 });
+    Object.defineProperty(overflow, "clientWidth", { configurable: true, value: 20 });
+    postCommand(win, { command: "request-audit" });
+
+    const audit = latestAuditMessage(messages);
+    const types = audit.findings.map((finding: { type: string }) => finding.type);
+
+    expect(types).toContain("broken-image");
+    expect(types).toContain("missing-alt");
+    expect(types).toContain("tiny-font");
+    expect(types).toContain("overflow");
+    expect(types).toContain("inert-script");
+    expect(audit.findings.every((finding: { elementId: string }) => finding.elementId)).toBe(true);
+
+    const missingAlt = audit.findings.find((finding: { type: string }) => finding.type === "missing-alt");
+    postCommand(win, { command: "select", id: missingAlt.elementId });
+    expect(win.document.getElementById("broken")?.getAttribute("data-wysiwyg-selected")).toBe("true");
+  });
+
+  it("reports zero findings for the clean sample document", () => {
+    const { win, messages } = createWindow(SAMPLE_HTML);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    expect(latestAuditMessage(messages).findings).toEqual([]);
   });
 });

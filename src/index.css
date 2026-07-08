@@ -825,6 +825,43 @@ button:disabled {
   font-weight: 700;
 }
 
+.validation-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.validation-finding {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #f1c5a8;
+  border-radius: 8px;
+  color: #7c2d12;
+  background: #fff7ed;
+  text-align: left;
+}
+
+.validation-finding span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.validation-finding strong {
+  color: #7c2d12;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.validation-finding em {
+  color: #9a5a2f;
+  font-size: 12px;
+  font-style: normal;
+}
+
 .image-upload {
   display: inline-flex;
   align-items: center;

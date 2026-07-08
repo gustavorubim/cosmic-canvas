@@ -365,6 +365,63 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     });
     publishSelected();
     scheduleDeckPublish();
+    publishAudit();
+  }
+
+  function auditLabel(element: Element) {
+    const tag = element.tagName.toLowerCase();
+    if (element.id) return tag + "#" + element.id;
+    const firstClass = element.classList[0];
+    return firstClass ? tag + "." + firstClass : tag;
+  }
+
+  function addAuditFinding(
+    findings: Array<{ id: string; elementId: string; type: string; label: string; message: string }>,
+    element: Element,
+    type: string,
+    message: string,
+  ) {
+    const elementId = ensureId(element);
+    findings.push({
+      id: `${type}-${elementId}`,
+      elementId,
+      type,
+      label: auditLabel(element),
+      message,
+    });
+  }
+
+  function publishAudit() {
+    const findings: Array<{ id: string; elementId: string; type: string; label: string; message: string }> = [];
+    document.querySelectorAll("img").forEach((image) => {
+      if ((image as HTMLElement).dataset.wysiwygEditor === "true") return;
+      const src = image.getAttribute("src") || "";
+      if (!src.trim() || (image as HTMLElement).dataset.cosmicImageError === "true") {
+        addAuditFinding(findings, image, "broken-image", "Image source is empty or failed to load.");
+      }
+      if (!image.hasAttribute("alt") || !(image.getAttribute("alt") || "").trim()) {
+        addAuditFinding(findings, image, "missing-alt", "Image is missing alt text.");
+      }
+    });
+
+    document.querySelectorAll("script[data-wysiwyg-preserved-script]").forEach((script) => {
+      addAuditFinding(findings, script, "inert-script", "External or inline script is inert while editing.");
+    });
+
+    document.querySelectorAll("body *").forEach((element) => {
+      if ((element as HTMLElement).dataset.wysiwygEditor === "true") return;
+      if (element.closest('[data-wysiwyg-editor="true"]')) return;
+      const htmlElement = element as HTMLElement;
+      if (htmlElement.scrollWidth > htmlElement.clientWidth + 1 || htmlElement.scrollHeight > htmlElement.clientHeight + 1) {
+        addAuditFinding(findings, element, "overflow", "Content appears clipped or overflowing.");
+      }
+      const fontSize = Number.parseFloat(win.getComputedStyle(element).fontSize || "0");
+      if (fontSize > 0 && fontSize < 12) {
+        addAuditFinding(findings, element, "tiny-font", "Text is smaller than 12px.");
+      }
+    });
+
+    post("wysiwyg-audit", { findings });
   }
 
   function elementLabel(element: Element) {
@@ -1168,6 +1225,18 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   document.addEventListener("blur", () => publishChange("blur"), true);
 
   document.addEventListener(
+    "error",
+    (event) => {
+      const target = event.target;
+      if (target instanceof win.HTMLImageElement) {
+        target.dataset.cosmicImageError = "true";
+        publishAudit();
+      }
+    },
+    true,
+  );
+
+  document.addEventListener(
     "keydown",
     (event) => {
       handleEditorKey(event, {
@@ -1213,6 +1282,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "go-slide") goToSlide(data);
     if (data.command === "nudge") nudge(Number(data.dx || 0), Number(data.dy || 0));
     if (data.command === "scroll-to") win.scrollTo(Number(data.x || 0), Number(data.y || 0));
+    if (data.command === "request-audit") publishAudit();
     if (data.command === "request-html") publishChange("request");
   });
 
@@ -1236,4 +1306,5 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     bodyTextStart: (document.body ? document.body.textContent || "" : "").trim().slice(0, 180),
   });
   publishDeck();
+  publishAudit();
 }

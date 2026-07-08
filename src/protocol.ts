@@ -46,11 +46,20 @@ export type DeckSlide = {
   section: string;
 };
 
+export type AuditFinding = {
+  id: string;
+  elementId: string;
+  type: "broken-image" | "missing-alt" | "overflow" | "tiny-font" | "inert-script";
+  label: string;
+  message: string;
+};
+
 /** Messages sent from the iframe bridge up to the app shell. */
 export type BridgeMessage =
   | { type: "wysiwyg-ready"; title: string; bodyTextStart: string }
   | { type: "wysiwyg-selection"; selected: SelectedElement | null }
   | { type: "wysiwyg-deck"; slides: DeckSlide[]; activeId: string }
+  | { type: "wysiwyg-audit"; findings: AuditFinding[] }
   | { type: "wysiwyg-shortcut"; action: "save" | "apply-source" | "undo" | "redo" }
   | {
       type: "wysiwyg-document-change";
@@ -81,12 +90,14 @@ export type BridgeCommand =
   | { command: "go-slide"; id: string }
   | { command: "nudge"; dx: number; dy: number }
   | { command: "scroll-to"; x: number; y: number }
+  | { command: "request-audit" }
   | { command: "request-html" };
 
 export const BRIDGE_MESSAGE_TYPES = [
   "wysiwyg-ready",
   "wysiwyg-selection",
   "wysiwyg-deck",
+  "wysiwyg-audit",
   "wysiwyg-shortcut",
   "wysiwyg-document-change",
 ] as const;

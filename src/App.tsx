@@ -6,6 +6,7 @@ import { Inspector, InspectorEmpty } from "./components/Inspector";
 import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
+import { ValidationPanel } from "./components/ValidationPanel";
 import {
   DEFAULT_DATA_ROWS,
   normalizeDataRows,
@@ -17,6 +18,7 @@ import {
   type DeckSlide,
   type EditorMode,
   isBridgeMessage,
+  type AuditFinding,
   type SelectedElement,
   type Viewport,
 } from "./protocol";
@@ -33,7 +35,7 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data";
+type SidePanel = "inspect" | "data" | "audit";
 
 type Toast = {
   id: number;
@@ -101,6 +103,7 @@ export default function App() {
   const [runTrustedScripts, setRunTrustedScripts] = useState(false);
   const [sourceVisible, setSourceVisible] = useState(true);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
+  const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
   const [activeSlideId, setActiveSlideId] = useState("");
   const [sidePanel, setSidePanel] = useState<SidePanel>("inspect");
   const [dataTitle, setDataTitle] = useState("Launch metrics");
@@ -176,6 +179,7 @@ export default function App() {
   function renderHtml(html: string, trustedScripts = runTrustedScripts) {
     setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
     setDeckSlides([]);
+    setAuditFindings([]);
     setActiveSlideId("");
     deckHintShownRef.current = false;
     setAppliedHtml(html);
@@ -481,6 +485,10 @@ export default function App() {
         }
       }
 
+      if (data.type === "wysiwyg-audit") {
+        setAuditFindings(data.findings);
+      }
+
       if (data.type === "wysiwyg-shortcut") {
         const actions = actionsRef.current;
         if (data.action === "save") void actions.saveToFile();
@@ -763,13 +771,18 @@ export default function App() {
               <button aria-pressed={sidePanel === "data"} onClick={() => setSidePanel("data")} type="button">
                 Data
               </button>
+              <button aria-pressed={sidePanel === "audit"} onClick={() => setSidePanel("audit")} type="button">
+                Audit
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
                 ? selected
                   ? selected.tagName
                   : "None"
-                : `${Math.max(0, dataRows.length - 1)} rows`}
+                : sidePanel === "data"
+                  ? `${Math.max(0, dataRows.length - 1)} rows`
+                  : `${auditFindings.length} issues`}
             </span>
           </div>
 
@@ -785,6 +798,14 @@ export default function App() {
               onAddRow={addDataRow}
               onAddColumn={addDataColumn}
               onInsert={insertDataTable}
+            />
+          ) : sidePanel === "audit" ? (
+            <ValidationPanel
+              findings={auditFindings}
+              onSelect={(elementId) => {
+                setSidePanel("inspect");
+                postCommand("select", { id: elementId });
+              }}
             />
           ) : selected ? (
             <Inspector
