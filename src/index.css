@@ -426,6 +426,24 @@ button:disabled {
   gap: 5px;
 }
 
+.template-picker {
+  display: inline-grid;
+  grid-template-columns: 104px 30px;
+  gap: 5px;
+  align-items: center;
+}
+
+.template-picker select {
+  width: 104px;
+  min-height: 30px;
+  border: 1px solid #c7d0da;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .timeline-actions button {
   width: 30px;
   height: 30px;

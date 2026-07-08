@@ -21,6 +21,7 @@ import {
   type AuditFinding,
   type InlineFormatAction,
   type SelectedElement,
+  type SlideTemplateKind,
   type Viewport,
 } from "./protocol";
 import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
@@ -246,6 +247,12 @@ export default function App() {
     const slide = deckSlides[activeSlideIndex];
     if (!slide) return;
     postCommand("insert-slide", { id: slide.id });
+  }
+
+  function insertSlideTemplate(template: SlideTemplateKind) {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    postCommand("insert-slide-template", { id: slide.id, template });
   }
 
   function renameDeckSlide(slide: DeckSlide, title: string) {
@@ -765,6 +772,7 @@ export default function App() {
               onRename={renameDeckSlide}
               onDelete={deleteCurrentSlide}
               onMove={moveCurrentSlide}
+              onTemplate={insertSlideTemplate}
             />
           ) : null}
         </section>

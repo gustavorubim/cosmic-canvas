@@ -8,6 +8,14 @@
 export type EditorMode = "text" | "select" | "move" | "preview";
 export type Viewport = "desktop" | "tablet" | "mobile";
 export type InlineFormatAction = "bold" | "italic" | "create-link" | "remove-link" | "toggle-list";
+export type SlideTemplateKind =
+  | "title"
+  | "section"
+  | "quote"
+  | "image-text"
+  | "metrics"
+  | "agenda"
+  | "closing";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -83,6 +91,7 @@ export type BridgeCommand =
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }
   | { command: "insert-slide"; id: string }
+  | { command: "insert-slide-template"; id: string; template: SlideTemplateKind }
   | { command: "rename-slide"; id: string; title: string }
   | { command: "delete-slide"; id: string }
   | { command: "move-slide"; id: string; offset: number }

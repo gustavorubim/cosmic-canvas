@@ -522,6 +522,47 @@ describe("slide management commands", () => {
   });
 });
 
+describe("slide template commands", () => {
+  it.each([
+    ["title", "Presentation title", "h1", 1],
+    ["section", "Section divider", "h2", 1],
+    ["quote", "Quote", "figure blockquote", 1],
+    ["image-text", "Image and text", ".media-layout img", 1],
+    ["metrics", "Metrics", ".metrics .metric", 3],
+    ["agenda", "Agenda", "ol li", 4],
+    ["closing", "Closing", "h2", 1],
+  ])("inserts a %s template as the active next slide", (template, title, selector, count) => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+
+    postCommand(win, { command: "insert-slide-template", id: firstSlide.id, template });
+
+    const inserted = win.document.querySelector(`section.slide[data-title="${title}"]`) as Element | null;
+    expect(inserted).not.toBeNull();
+    expect(inserted?.querySelectorAll(selector)).toHaveLength(count);
+    expect(inserted?.textContent).not.toContain("Slide One");
+    expect(inserted?.textContent).not.toContain("Alpha bravo charlie");
+
+    const deck = latestDeckMessage(messages);
+    expect(deck.slides.map((slide: { title: string }) => slide.title)).toContain(title);
+    expect(deck.activeId).toBe(inserted?.getAttribute("data-wysiwyg-id"));
+    expect(inserted?.getAttribute("data-wysiwyg-current-slide")).toBe("true");
+  });
+
+  it("exports template slides without adding duplicate style blocks", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const firstSlide = latestDeckMessage(messages).slides[0];
+
+    postCommand(win, { command: "insert-slide-template", id: firstSlide.id, template: "metrics" });
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).toContain('data-title="Metrics"');
+    expect(cleaned).toContain('<section class="metrics">');
+    expect(cleaned).not.toContain("data-wysiwyg-");
+    expect(cleaned.match(/<style/g)?.length ?? 0).toBe(1);
+  });
+});
+
 describe("element insertion commands", () => {
   it.each([
     ["heading", "h2", "New heading"],

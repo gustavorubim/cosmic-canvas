@@ -786,6 +786,121 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     }
   }
 
+  function clearSlideContents(slide: Element) {
+    while (slide.firstChild) slide.firstChild.remove();
+  }
+
+  function textElement(tagName: string, text: string, className = "") {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    element.textContent = text;
+    return element;
+  }
+
+  function templateImage() {
+    const image = document.createElement("img");
+    image.src = placeholderImageSrc();
+    image.alt = "Placeholder image";
+    image.style.maxWidth = "100%";
+    image.style.height = "auto";
+    return image;
+  }
+
+  function replaceSlideWithTemplate(slide: Element, template: unknown) {
+    const kind = String(template || "").trim();
+    clearEditorState(slide);
+    clearSlideContents(slide);
+
+    if (kind === "title") {
+      slide.setAttribute("data-title", "Presentation title");
+      slide.append(
+        textElement("p", "Subtitle or presenter", "eyebrow"),
+        textElement("h1", "Presentation title"),
+        textElement("p", "A concise setup for the story this deck will tell.", "summary"),
+      );
+      return true;
+    }
+
+    if (kind === "section") {
+      slide.setAttribute("data-title", "Section divider");
+      slide.append(
+        textElement("p", "Section", "eyebrow"),
+        textElement("h2", "Section divider"),
+        textElement("p", "Frame the next group of slides in one sentence.", "summary"),
+      );
+      return true;
+    }
+
+    if (kind === "quote") {
+      slide.setAttribute("data-title", "Quote");
+      const figure = document.createElement("figure");
+      figure.append(textElement("blockquote", "A sharp quote or customer signal belongs here."));
+      figure.append(textElement("figcaption", "Source or attribution"));
+      slide.append(figure);
+      return true;
+    }
+
+    if (kind === "image-text") {
+      slide.setAttribute("data-title", "Image and text");
+      const layout = document.createElement("div");
+      layout.className = "media-layout";
+      layout.style.display = "grid";
+      layout.style.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr)";
+      layout.style.gap = "28px";
+      layout.style.alignItems = "center";
+      const copy = document.createElement("div");
+      copy.append(
+        textElement("h2", "Image and text"),
+        textElement("p", "Pair one visual with the decision, insight, or example it supports."),
+      );
+      layout.append(templateImage(), copy);
+      slide.append(layout);
+      return true;
+    }
+
+    if (kind === "metrics") {
+      slide.setAttribute("data-title", "Metrics");
+      slide.append(textElement("h2", "Key metrics"));
+      const metrics = document.createElement("section");
+      metrics.className = "metrics";
+      [
+        ["42%", "Primary result"],
+        ["18", "Adoption signal"],
+        ["3", "Open decisions"],
+      ].forEach(([value, label]) => {
+        const card = document.createElement("div");
+        card.className = "metric";
+        card.append(textElement("strong", value), textElement("span", label));
+        metrics.append(card);
+      });
+      slide.append(metrics);
+      return true;
+    }
+
+    if (kind === "agenda") {
+      slide.setAttribute("data-title", "Agenda");
+      slide.append(textElement("h2", "Agenda"));
+      const list = document.createElement("ol");
+      ["Context", "Evidence", "Recommendation", "Next steps"].forEach((item) => {
+        list.append(textElement("li", item));
+      });
+      slide.append(list);
+      return true;
+    }
+
+    if (kind === "closing") {
+      slide.setAttribute("data-title", "Closing");
+      slide.append(
+        textElement("p", "Next steps", "eyebrow"),
+        textElement("h2", "Closing"),
+        textElement("p", "End with the decision, owner, and date that moves this forward.", "summary"),
+      );
+      return true;
+    }
+
+    return false;
+  }
+
   function duplicateSlide(payload: Record<string, unknown>) {
     const slides = slideCandidates();
     const slide = payload?.id
@@ -811,6 +926,19 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     markActiveSlide(clone);
     clone.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
     publishChange("insert-slide");
+  }
+
+  function insertSlideTemplate(payload: Record<string, unknown>) {
+    const { slide } = slideFromPayload(payload);
+    if (!slide || !slide.parentElement) return;
+    const clone = slide.cloneNode(false) as Element;
+    if (!replaceSlideWithTemplate(clone, payload.template)) return;
+    slide.after(clone);
+    clearSelection();
+    markActiveSlide(clone);
+    clone.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("insert-slide-template");
+    publishDeck();
   }
 
   function renameSlide(payload: Record<string, unknown>) {
@@ -1456,6 +1584,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);
+    if (data.command === "insert-slide-template") insertSlideTemplate(data);
     if (data.command === "rename-slide") renameSlide(data);
     if (data.command === "delete-slide") deleteSlide(data);
     if (data.command === "move-slide") moveSlide(data);
