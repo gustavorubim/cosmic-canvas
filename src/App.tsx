@@ -1,5 +1,13 @@
 import { ChevronRight } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DECK_HINT_MESSAGE,
+  hostDocumentChangeDelay,
+  markBeforeUnloadDirty,
+  mergeSelectionEcho,
+  shouldInstallBeforeUnload,
+  shouldShowDeckHint,
+} from "./appPolicies";
 import { CheckpointPanel } from "./components/CheckpointPanel";
 import { DataPanel } from "./components/DataPanel";
 import { DeckTimeline } from "./components/DeckTimeline";
@@ -198,8 +206,7 @@ export default function App() {
     if (immediate) {
       post();
     } else {
-      const delay = reason === "input" || reason === "source" ? 1000 : 250;
-      pendingHostChangeTimer.current = window.setTimeout(post, delay);
+      pendingHostChangeTimer.current = window.setTimeout(post, hostDocumentChangeDelay(reason));
     }
   }
 
@@ -605,24 +612,16 @@ export default function App() {
         const editingInspectorText =
           active instanceof HTMLElement && Boolean(active.closest(".text-control"));
         setSelected((current) => {
-          if (
-            editingInspectorText &&
-            current &&
-            data.selected &&
-            current.id === data.selected.id
-          ) {
-            return { ...data.selected, text: current.text };
-          }
-          return data.selected;
+          return mergeSelectionEcho(current, data.selected, editingInspectorText);
         });
       }
 
       if (data.type === "wysiwyg-deck") {
         setDeckSlides(data.slides);
         setActiveSlideId(data.activeId);
-        if (data.slides.length > 0 && !deckHintShownRef.current) {
+        if (shouldShowDeckHint(data.slides.length, deckHintShownRef.current)) {
           deckHintShownRef.current = true;
-          showToast("Edit modes type text - use the timeline for slides. Preview runs deck shortcuts.");
+          showToast(DECK_HINT_MESSAGE);
         }
       }
 
@@ -754,11 +753,9 @@ export default function App() {
   }, [sourceHtml, initialHtml]);
 
   useEffect(() => {
-    if (isVsCode || !sourceDirty) return;
+    if (!shouldInstallBeforeUnload(isVsCode, sourceDirty)) return;
     function onBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = "";
-      return "";
+      return markBeforeUnloadDirty(event);
     }
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);

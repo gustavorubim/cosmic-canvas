@@ -98,6 +98,10 @@ function latestLayersMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-layers").at(-1);
 }
 
+function latestSelectionMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-selection").at(-1);
+}
+
 function stubRect(element: Element, rect: Partial<DOMRect>) {
   const full = {
     x: rect.left ?? 0,
@@ -263,6 +267,70 @@ describe("keyboard fence", () => {
     keydown(win, win.document.body, "z", { ctrlKey: true });
     expect(messages).toContainEqual({ type: "wysiwyg-shortcut", action: "undo" });
   });
+
+  it.each(
+    (["text", "select", "move", "preview"] as const).flatMap((mode) =>
+      [true, false].flatMap((typing) =>
+        [
+          { label: "Space", key: " ", nav: true },
+          { label: "Backspace", key: "Backspace", nav: true },
+          { label: "ArrowRight", key: "ArrowRight", nav: true },
+          { label: "PageDown", key: "PageDown", nav: true },
+          { label: "Escape", key: "Escape", nav: false },
+          { label: "Delete", key: "Delete", nav: false },
+          { label: "Ctrl+S", key: "s", nav: false, init: { ctrlKey: true }, shortcut: "save" },
+        ].map((key) => ({ mode, typing, ...key })),
+      ),
+    ),
+  )("guards $label in $mode mode with typing=$typing", ({ mode, typing, key, nav, init, shortcut }) => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    const input = win.document.getElementById("deck-input") as HTMLInputElement;
+    click(win, paragraph);
+    postCommand(win, { command: "set-mode", mode });
+
+    let target: EventTarget = win.document.body;
+    if (typing) {
+      if (mode === "text") {
+        target = paragraph;
+      } else {
+        input.focus();
+        target = input;
+      }
+    } else if (mode === "text") {
+      keydown(win, paragraph, "Escape");
+    }
+
+    win.__deckKeysSeen = [];
+    const event = keydown(win, target, key, init);
+    const previewMode = mode === "preview";
+
+    expect(win.__deckKeysSeen).toEqual(nav && previewMode ? [key, key] : []);
+    if (nav) {
+      expect(event.defaultPrevented).toBe(previewMode || !typing);
+    }
+    if (shortcut) {
+      expect(event.defaultPrevented).toBe(true);
+      expect(messages).toContainEqual({ type: "wysiwyg-shortcut", action: shortcut });
+    }
+  });
+
+  it("keeps form-field typing safe and does not delete the selected element", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    const input = win.document.getElementById("deck-input") as HTMLInputElement;
+    click(win, paragraph);
+    postCommand(win, { command: "set-mode", mode: "select" });
+    input.focus();
+
+    const space = keydown(win, input, " ");
+    const del = keydown(win, input, "Delete");
+
+    expect(space.defaultPrevented).toBe(false);
+    expect(del.defaultPrevented).toBe(false);
+    expect(win.__deckKeysSeen).toEqual([]);
+    expect(win.document.getElementById("editable")).not.toBeNull();
+  });
 });
 
 describe("editor key semantics", () => {
@@ -292,6 +360,26 @@ describe("editor key semantics", () => {
     keydown(win, win.document.body, "Backspace");
     expect(win.document.getElementById("editable")).toBeNull();
     expect(win.__deckKeysSeen).toEqual([]);
+  });
+
+  it("publishes editableText from the same predicate used by contenteditable", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+    const slide = win.document.querySelector("section.slide") as Element;
+
+    click(win, paragraph);
+    expect(latestSelectionMessage(messages).selected).toMatchObject({
+      id: paragraph.getAttribute("data-wysiwyg-id"),
+      editableText: true,
+    });
+
+    postCommand(win, { command: "select", id: slide.getAttribute("data-wysiwyg-id") });
+
+    expect(latestSelectionMessage(messages).selected).toMatchObject({
+      id: slide.getAttribute("data-wysiwyg-id"),
+      editableText: false,
+    });
+    expect(slide.hasAttribute("contenteditable")).toBe(false);
   });
 
   it("treats Escape as an editing ladder", () => {
