@@ -1146,10 +1146,10 @@ button:disabled {
   left: 50%;
   transform: translateX(-50%);
   z-index: 80;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 10px 9px 16px;
+  display: grid;
+  gap: 8px;
+  width: min(680px, calc(100vw - 28px));
+  padding: 10px;
   border: 1px solid #d97706;
   border-radius: 10px;
   background: #fffaf2;
@@ -1157,6 +1157,31 @@ button:disabled {
   font-size: 13px;
   font-weight: 650;
   color: #52606d;
+}
+
+.draft-list {
+  display: grid;
+  gap: 6px;
+}
+
+.draft-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(150px, auto) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.draft-item strong {
+  color: #26323f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-item em {
+  color: #8795a1;
+  font-size: 12px;
+  font-style: normal;
 }
 
 .draft-banner .button {

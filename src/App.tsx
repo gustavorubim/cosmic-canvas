@@ -13,6 +13,7 @@ import {
   parseDataText,
   serializeDataRows,
 } from "./csv";
+import { type DraftRecord, draftIdFor, readDrafts, removeDraft, saveDraft } from "./drafts";
 import {
   cleanEditorHtml,
   createPrintHtml,
@@ -53,13 +54,6 @@ type Toast = {
   id: number;
   message: string;
 };
-
-type DraftPrompt = {
-  html: string;
-  savedAt: number;
-};
-
-const DRAFT_KEY = "cosmic-canvas-draft";
 
 const viewportLabels: Record<Viewport, string> = {
   desktop: "Desktop",
@@ -105,6 +99,8 @@ export default function App() {
   const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const toastIdRef = useRef(0);
   const deckHintShownRef = useRef(false);
+  const draftIdRef = useRef(draftIdFor("sample", initialHtml));
+  const draftTitleRef = useRef("Sample document");
 
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
   const [appliedHtml, setAppliedHtml] = useState(initialHtml);
@@ -127,7 +123,7 @@ export default function App() {
   });
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [draftPrompt, setDraftPrompt] = useState<DraftPrompt | null>(null);
+  const [draftPrompt, setDraftPrompt] = useState<DraftRecord[]>([]);
 
   sourceHtmlRef.current = sourceHtml;
 
@@ -199,8 +195,14 @@ export default function App() {
     setSelected(null);
   }
 
-  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts) {
+  function setDraftContext(title: string, html: string) {
+    draftTitleRef.current = title || "Untitled document";
+    draftIdRef.current = draftIdFor(draftTitleRef.current, html);
+  }
+
+  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts, title?: string) {
     const clean = normalizeEditableSource(html);
+    if (title) setDraftContext(title, clean);
     setSourceHtml(clean);
     renderHtml(clean, trustedScripts);
     if (addToHistory) pushHistory(clean);
@@ -214,6 +216,7 @@ export default function App() {
 
   function loadHostDocument(html: string) {
     const clean = normalizeEditableSource(html);
+    setDraftContext("VS Code document", clean);
     setSourceHtml(clean);
     renderHtml(clean);
     syncHistoryState({ stack: [clean], index: 0 });
@@ -399,7 +402,7 @@ export default function App() {
         });
         fileHandleRef.current = handle;
         const file = await handle.getFile();
-        loadHtml(await file.text());
+        loadHtml(await file.text(), true, runTrustedScripts, file.name);
         showToast(`Opened ${file.name}`);
         return;
       } catch (error) {
@@ -414,7 +417,7 @@ export default function App() {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
     fileHandleRef.current = null;
-    loadHtml(await file.text());
+    loadHtml(await file.text(), true, runTrustedScripts, file.name);
     showToast(`Opened ${file.name}`);
     event.currentTarget.value = "";
   }
@@ -507,17 +510,18 @@ export default function App() {
     showToast("Downloaded print HTML");
   }
 
-  function restoreDraft() {
-    if (!draftPrompt) return;
-    loadHtml(draftPrompt.html);
-    setDraftPrompt(null);
-    showToast("Draft restored");
+  function restoreDraft(draft: DraftRecord) {
+    setDraftContext(draft.title, draft.html);
+    loadHtml(draft.html);
+    setDraftPrompt([]);
+    showToast(`Draft restored: ${draft.title}`);
   }
 
-  function discardDraft() {
-    setDraftPrompt(null);
+  function discardDraft(id?: string) {
+    const targetId = id || draftPrompt[0]?.id;
+    setDraftPrompt((current) => current.filter((draft) => draft.id !== targetId));
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      if (targetId) removeDraft(localStorage, targetId);
     } catch {
       // Best-effort cleanup.
     }
@@ -674,7 +678,12 @@ export default function App() {
     if (sourceHtml === initialHtml) return;
     const id = window.setTimeout(() => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ html: sourceHtml, savedAt: Date.now() }));
+        saveDraft(localStorage, {
+          id: draftIdRef.current,
+          title: draftTitleRef.current,
+          html: sourceHtml,
+          savedAt: Date.now(),
+        });
       } catch {
         // Storage may be unavailable (private mode / quota); drafts are best-effort.
       }
@@ -708,17 +717,13 @@ export default function App() {
           if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
           return response.text();
         })
-        .then((html) => loadHtml(html, true, trusted))
+        .then((html) => loadHtml(html, true, trusted, loadUrl))
         .catch((error: unknown) => console.error(error));
       return;
     }
 
     try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { html?: string; savedAt?: number };
-      if (typeof draft.html !== "string" || !draft.html.trim()) return;
-      setDraftPrompt({ html: draft.html, savedAt: draft.savedAt ?? 0 });
+      setDraftPrompt(readDrafts(localStorage));
     } catch {
       // Ignore malformed drafts.
     }
@@ -761,18 +766,23 @@ export default function App() {
         onViewport={setViewport}
       />
 
-      {draftPrompt ? (
+      {draftPrompt.length ? (
         <div className="draft-banner" role="alert">
-          <span>
-            Unsaved draft from{" "}
-            {draftPrompt.savedAt ? new Date(draftPrompt.savedAt).toLocaleString() : "your last session"}
-          </span>
-          <button className="button primary" type="button" onClick={restoreDraft}>
-            Restore
-          </button>
-          <button className="button secondary" type="button" onClick={discardDraft}>
-            Discard
-          </button>
+          <span>Recent drafts</span>
+          <div className="draft-list">
+            {draftPrompt.slice(0, 3).map((draft) => (
+              <div className="draft-item" key={draft.id}>
+                <strong>{draft.title}</strong>
+                <em>{draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "Unknown time"}</em>
+                <button className="button primary" type="button" onClick={() => restoreDraft(draft)}>
+                  Restore
+                </button>
+                <button className="button secondary" type="button" onClick={() => discardDraft(draft.id)}>
+                  Discard
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
