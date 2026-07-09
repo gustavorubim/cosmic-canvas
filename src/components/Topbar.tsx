@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, Download, FileCode2, Save } from "lucide-react";
+import { ChevronDown, Copy, Download, FileCode2, ListRestart, Save } from "lucide-react";
 import { type ChangeEvent, type RefObject, useEffect, useRef, useState } from "react";
 
 type TopbarProps = {
@@ -11,6 +11,7 @@ type TopbarProps = {
   onDownload: () => void;
   onDownloadSelfContained: () => void;
   onDownloadPrint: () => void;
+  onNormalize: () => void;
 };
 
 export function Topbar({
@@ -23,6 +24,7 @@ export function Topbar({
   onDownload,
   onDownloadSelfContained,
   onDownloadPrint,
+  onNormalize,
 }: TopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -117,6 +119,17 @@ export function Topbar({
               >
                 <Download size={15} aria-hidden="true" />
                 Print HTML
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onNormalize();
+                }}
+              >
+                <ListRestart size={15} aria-hidden="true" />
+                Normalize deck
               </button>
             </div>
           ) : null}

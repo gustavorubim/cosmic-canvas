@@ -554,6 +554,104 @@ const PRINT_EXPORT_STYLE = `
 }
 `;
 
+const DECK_SLIDE_SELECTORS = [
+  "section.slide",
+  "article.slide",
+  "section[data-title]",
+  "section[data-section]",
+  "[data-slide]",
+  "[data-slide-id]",
+  ".reveal .slides > section",
+  ".reveal .slides > section > section",
+];
+
+const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
+const EMPTY_NORMALIZE_TAGS = new Set(["p", "span", "div", "li", "strong", "em", "b", "i", "u", "small", "mark"]);
+
+function isRevealStackForNormalize(element: Element) {
+  return (
+    element.matches(".reveal .slides > section") &&
+    Array.from(element.children).some((child) => child.tagName.toLowerCase() === "section")
+  );
+}
+
+function deckSlides(doc: Document) {
+  const seen = new Set<Element>();
+  const slides: Element[] = [];
+  for (const selector of DECK_SLIDE_SELECTORS) {
+    doc.querySelectorAll(selector).forEach((element) => {
+      if (isRevealStackForNormalize(element)) return;
+      if (seen.has(element)) return;
+      seen.add(element);
+      slides.push(element);
+    });
+  }
+  return slides;
+}
+
+function renameElement(doc: Document, element: Element, tagName: string) {
+  if (element.tagName.toLowerCase() === tagName) return element;
+  const next = doc.createElement(tagName);
+  Array.from(element.attributes).forEach((attribute) => next.setAttribute(attribute.name, attribute.value));
+  while (element.firstChild) next.append(element.firstChild);
+  element.replaceWith(next);
+  return next;
+}
+
+function normalizeSlideHeadings(doc: Document) {
+  deckSlides(doc).forEach((slide) => {
+    const headings = Array.from(slide.querySelectorAll(HEADING_SELECTOR));
+    headings.forEach((heading, index) => {
+      renameElement(doc, heading, index === 0 ? "h2" : "h3");
+    });
+  });
+}
+
+function hasRawTextAncestor(node: Node) {
+  const parent = node.parentElement;
+  return Boolean(parent?.closest(Array.from(RAW_TEXT_TAGS).join(",")));
+}
+
+function normalizeTextNodes(root: Element) {
+  const showText = root.ownerDocument.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = root.ownerDocument.createTreeWalker(root, showText);
+  const nodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+
+  nodes.forEach((textNode) => {
+    if (hasRawTextAncestor(textNode)) return;
+    const original = textNode.textContent || "";
+    const trimmed = original.replace(/\s+/g, " ").trim();
+    if (!trimmed) {
+      textNode.remove();
+      return;
+    }
+    const prefix = /^\s/.test(original) && textNode.previousSibling ? " " : "";
+    const suffix = /\s$/.test(original) && textNode.nextSibling ? " " : "";
+    textNode.textContent = `${prefix}${trimmed}${suffix}`;
+  });
+}
+
+function removeEmptyNormalizeNodes(root: Element) {
+  let removed = true;
+  while (removed) {
+    removed = false;
+    Array.from(root.querySelectorAll(Array.from(EMPTY_NORMALIZE_TAGS).join(",")))
+      .reverse()
+      .forEach((element) => {
+        if (element.attributes.length > 0) return;
+        if (element.children.length > 0) return;
+        if ((element.textContent || "").trim() !== "") return;
+        element.remove();
+        removed = true;
+      });
+  }
+}
+
 export function cleanEditorHtml(html: string, options: CleanOptions = {}): string {
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
@@ -613,6 +711,15 @@ export function createPrintHtml(html: string) {
   style.textContent = PRINT_EXPORT_STYLE;
   doc.head.append(style);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
+
+export function normalizeDeckHtml(html: string) {
+  const doc = parseDocument(cleanEditorHtml(html));
+  ensureDocumentShape(doc);
+  normalizeSlideHeadings(doc);
+  normalizeTextNodes(doc.body);
+  removeEmptyNormalizeNodes(doc.body);
+  return prettyPrintDocument(doc);
 }
 
 export function prepareEditableHtml(html: string, runTrustedScripts = false): string {

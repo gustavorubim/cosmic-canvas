@@ -2,8 +2,31 @@ import { useEffect, useRef } from "react";
 import { PanelLeftOpen } from "lucide-react";
 import { basicSetup } from "codemirror";
 import { html } from "@codemirror/lang-html";
-import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { type SelectedElement } from "../protocol";
+import { findOpeningTagLocation, sourceNeedleForSelected } from "../sourceSync";
+
+const setFlashLine = StateEffect.define<number | null>();
+
+const flashLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(value, transaction) {
+    let next = value.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setFlashLine)) {
+        next =
+          effect.value === null
+            ? Decoration.none
+            : Decoration.set([Decoration.line({ class: "cm-source-sync-line" }).range(effect.value)]);
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 export type SourcePaneProps = {
   value: string;
@@ -12,11 +35,13 @@ export type SourcePaneProps = {
   onShow: () => void;
   dirty: boolean;
   onApply: () => void;
+  selected: SelectedElement | null;
 };
 
-export function SourcePane({ value, onChange, visible, onShow, dirty, onApply }: SourcePaneProps) {
+export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, selected }: SourcePaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const flashTimerRef = useRef<number>();
 
   // Keep a ref to the latest onChange so the updateListener always calls the
   // current callback without needing to recreate the editor.
@@ -41,6 +66,7 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply }:
         basicSetup,
         html(),
         EditorView.lineWrapping,
+        flashLineField,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChangeRef.current(update.state.doc.toString());
@@ -58,6 +84,7 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply }:
     return () => {
       view.destroy();
       viewRef.current = null;
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
     };
   }, [visible]);
 
@@ -73,6 +100,26 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply }:
       });
     }
   }, [value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const location = findOpeningTagLocation(value, selected);
+    if (!view || !location) return;
+
+    const line = view.state.doc.line(location.lineNumber);
+    view.dispatch({
+      selection: { anchor: location.from },
+      effects: [
+        EditorView.scrollIntoView(location.from, { y: "center" }),
+        setFlashLine.of(line.from),
+      ],
+    });
+
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => {
+      viewRef.current?.dispatch({ effects: setFlashLine.of(null) });
+    }, 1000);
+  }, [selected?.id, selected?.domId, selected?.tagName, selected?.classes.join(" "), visible]);
 
   if (!visible) {
     return (
@@ -92,6 +139,7 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply }:
       <div className="pane-title">
         <span>HTML source</span>
         <span className="source-meta">
+          {selected ? <small title={sourceNeedleForSelected(selected)}>Synced</small> : null}
           {dirty ? (
             <button
               className="apply-chip"

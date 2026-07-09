@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CheckpointPanel } from "./components/CheckpointPanel";
 import { DataPanel } from "./components/DataPanel";
 import { DeckTimeline } from "./components/DeckTimeline";
 import { FindPanel } from "./components/FindPanel";
@@ -9,6 +10,11 @@ import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
 import { ValidationPanel } from "./components/ValidationPanel";
+import {
+  type Checkpoint,
+  createCheckpoint,
+  restoreCheckpoint,
+} from "./checkpoints";
 import {
   DEFAULT_DATA_ROWS,
   normalizeDataRows,
@@ -21,6 +27,7 @@ import {
   createPrintHtml,
   createSelfContainedHtml,
   normalizeHtmlInput,
+  normalizeDeckHtml,
   prepareEditableHtml,
   SAMPLE_HTML,
 } from "./htmlDocument";
@@ -52,7 +59,7 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data" | "audit" | "find" | "layers";
+type SidePanel = "inspect" | "data" | "audit" | "find" | "layers" | "checkpoints";
 
 type Toast = {
   id: number;
@@ -117,6 +124,8 @@ export default function App() {
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
   const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
   const [layers, setLayers] = useState<LayerItem[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [checkpointName, setCheckpointName] = useState("");
   const [findQuery, setFindQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [findCount, setFindCount] = useState(0);
@@ -389,6 +398,28 @@ export default function App() {
 
   function updateZOrder(action: ZOrderAction) {
     postCommand("z-order", { action });
+  }
+
+  function createNamedCheckpoint() {
+    const next = createCheckpoint(checkpoints, sourceHtmlRef.current, checkpointName);
+    setCheckpoints(next);
+    setCheckpointName("");
+    showToast(`Checkpoint created: ${next[0].name}`);
+  }
+
+  function restoreCheckpointById(id: string) {
+    const html = restoreCheckpoint(checkpoints, id);
+    if (!html) return;
+    loadHtml(html);
+    postHostDocumentChange(html, "checkpoint", true);
+    showToast("Checkpoint restored");
+  }
+
+  function normalizeCurrentDeck() {
+    const normalized = normalizeDeckHtml(sourceHtmlRef.current);
+    loadHtml(normalized);
+    postHostDocumentChange(normalized, "normalize", true);
+    showToast("Deck normalized");
   }
 
   function stepHistory(offset: number) {
@@ -776,6 +807,7 @@ export default function App() {
         onDownload={downloadHtml}
         onDownloadSelfContained={() => void downloadSelfContainedHtml()}
         onDownloadPrint={downloadPrintHtml}
+        onNormalize={normalizeCurrentDeck}
       />
 
       <Toolbar
@@ -823,6 +855,7 @@ export default function App() {
           onShow={() => setSourceVisible(true)}
           dirty={sourceDirty}
           onApply={applySource}
+          selected={selected}
         />
 
         <section
@@ -910,6 +943,13 @@ export default function App() {
               <button aria-pressed={sidePanel === "layers"} onClick={() => setSidePanel("layers")} type="button">
                 Layers
               </button>
+              <button
+                aria-pressed={sidePanel === "checkpoints"}
+                onClick={() => setSidePanel("checkpoints")}
+                type="button"
+              >
+                Saves
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
@@ -922,7 +962,9 @@ export default function App() {
                     ? `${findCount} matches`
                     : sidePanel === "layers"
                       ? `${layers.length} layers`
-                    : `${auditFindings.length} issues`}
+                      : sidePanel === "checkpoints"
+                        ? `${checkpoints.length} saved`
+                        : `${auditFindings.length} issues`}
             </span>
           </div>
 
@@ -966,6 +1008,14 @@ export default function App() {
                 postCommand("select", { id });
               }}
               onZOrder={updateZOrder}
+            />
+          ) : sidePanel === "checkpoints" ? (
+            <CheckpointPanel
+              checkpoints={checkpoints}
+              name={checkpointName}
+              onName={setCheckpointName}
+              onCreate={createNamedCheckpoint}
+              onRestore={restoreCheckpointById}
             />
           ) : selected ? (
             <Inspector

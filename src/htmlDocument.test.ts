@@ -5,6 +5,7 @@ import {
   cleanEditorHtml,
   createPrintHtml,
   createSelfContainedHtml,
+  normalizeDeckHtml,
   prepareEditableHtml,
 } from "./htmlDocument";
 
@@ -151,5 +152,47 @@ describe("export variants", () => {
     expect(printable).toContain("data-cosmic-print-export");
     expect(printable).toContain("page-break-after: always");
     expect(printable).toContain("break-after: page");
+  });
+});
+
+describe("normalizeDeckHtml", () => {
+  it("normalizes deck heading levels, spacing, and empty nodes idempotently", () => {
+    const messy = `<!doctype html>
+<html><head><title>Messy</title></head><body>
+<section class="slide">
+  <h1> Welcome   home </h1>
+  <p> A   short
+       line. </p>
+  <p> </p>
+  <div></div>
+  <h2> Details </h2>
+</section>
+<section data-slide>
+  <h3> Second    slide </h3>
+  <span></span>
+</section>
+</body></html>`;
+    const normalized = normalizeDeckHtml(messy);
+
+    expect(normalized).toBe(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Messy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
+  <body>
+    <section class="slide">
+      <h2>Welcome home</h2>
+      <p>A short line.</p>
+      <h3>Details</h3>
+    </section>
+    <section data-slide="">
+      <h2>Second slide</h2>
+    </section>
+  </body>
+</html>
+`);
+    expect(normalizeDeckHtml(normalized)).toBe(normalized);
   });
 });

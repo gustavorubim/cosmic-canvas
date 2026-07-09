@@ -653,6 +653,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     post("wysiwyg-selection", {
       selected: {
         id: ensureId(selectedElement),
+        domId: selectedElement.id || "",
         tagName: selectedElement.tagName.toLowerCase(),
         text: selectedElement.textContent || "",
         childElementCount: selectedElement.childElementCount,

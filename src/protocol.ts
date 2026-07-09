@@ -29,6 +29,7 @@ export type BreadcrumbNode = {
 
 export type SelectedElement = {
   id: string;
+  domId: string;
   tagName: string;
   text: string;
   childElementCount: number;
