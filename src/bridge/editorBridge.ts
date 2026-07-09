@@ -328,6 +328,28 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     ).slice(0, 80);
   }
 
+  function scrubThumbnailElement(element: Element) {
+    element.querySelectorAll("script, style, [data-wysiwyg-editor='true']").forEach((child) => child.remove());
+    [element, ...Array.from(element.querySelectorAll("*"))].forEach((node) => {
+      Array.from(node.attributes).forEach((attribute) => {
+        if (
+          attribute.name.startsWith("data-wysiwyg-") ||
+          attribute.name.startsWith("on") ||
+          attribute.name === "contenteditable" ||
+          attribute.name === "spellcheck"
+        ) {
+          node.removeAttribute(attribute.name);
+        }
+      });
+    });
+  }
+
+  function slideThumbnailHtml(slide: Element) {
+    const clone = slide.cloneNode(true) as Element;
+    scrubThumbnailElement(clone);
+    return clone.outerHTML.slice(0, 6000);
+  }
+
   function visibleArea(element: Element) {
     const rect = element.getBoundingClientRect();
     const width = Math.max(0, Math.min(rect.right, win.innerWidth) - Math.max(rect.left, 0));
@@ -374,6 +396,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         index,
         title: slideTitle(slide, index),
         section: slide.getAttribute("data-section") || slide.getAttribute("data-title") || "",
+        thumbnailHtml: slideThumbnailHtml(slide),
       })),
     });
   }

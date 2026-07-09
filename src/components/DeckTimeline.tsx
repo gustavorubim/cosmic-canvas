@@ -141,6 +141,11 @@ export function DeckTimeline({
             type="button"
           >
             <span>{slide.index + 1}</span>
+            <div
+              aria-hidden="true"
+              className="slide-thumb"
+              dangerouslySetInnerHTML={{ __html: slide.thumbnailHtml }}
+            />
             <strong>{slide.title}</strong>
             {slide.section ? <em>{slide.section}</em> : null}
           </button>

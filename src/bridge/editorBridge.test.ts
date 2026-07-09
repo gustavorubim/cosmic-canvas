@@ -491,6 +491,24 @@ describe("deck detection", () => {
       "Vertical Two B",
     ]);
   });
+
+  it("publishes sanitized slide thumbnails for the timeline", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><head><title>Thumbs</title></head><body>
+        <section class="slide" data-title="Thumb"><h2 onclick="bad()">Thumb</h2><script>bad()</script><p data-wysiwyg-id="x">Body</p></section>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    const deck = latestDeckMessage(messages);
+    const thumbnail = deck.slides[0].thumbnailHtml;
+
+    expect(thumbnail).toContain("<h2>Thumb</h2>");
+    expect(thumbnail).toContain("Body");
+    expect(thumbnail).not.toContain("<script");
+    expect(thumbnail).not.toContain("onclick");
+    expect(thumbnail).not.toContain("data-wysiwyg-id");
+  });
 });
 
 describe("slide management commands", () => {

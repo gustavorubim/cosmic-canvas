@@ -60,6 +60,7 @@ export type DeckSlide = {
   index: number;
   title: string;
   section: string;
+  thumbnailHtml: string;
 };
 
 export type AuditFinding = {
