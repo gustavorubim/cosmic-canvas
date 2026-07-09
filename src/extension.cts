@@ -63,7 +63,9 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
     const webview = webviewPanel.webview;
     webview.options = {
       enableScripts: true,
-      localResourceRoots: [],
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.context.extensionUri, "dist"),
+      ],
     };
     webview.html = this.webviewHtml(webview);
 
@@ -139,12 +141,14 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
       throw new Error("Run npm run build before opening Cosmic Canvas in VS Code.");
     }
 
-    const scriptSource = inlineScriptSource(fs.readFileSync(path.join(assetsPath, scriptFile), "utf8"));
-    const styleSource = inlineStyleSource(fs.readFileSync(path.join(assetsPath, styleFile), "utf8"));
-
-    // Inline the app bundle instead of loading it through asWebviewUri. Some VS
-    // Code builds can fail before rendering when their webview resource service
-    // worker cannot register, so keep the extension shell self-contained.
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, "dist", "assets", scriptFile),
+    );
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, "dist", "assets", styleFile),
+    );
+    // Load the hashed Vite assets explicitly. The build can emit small helper
+    // chunks before the main bundle, so never pick an arbitrary first .js file.
     const trustedAssetSources = [
       "https://cdn.jsdelivr.net",
       "https://unpkg.com",
@@ -167,23 +171,15 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>${styleSource}</style>
+    <link rel="stylesheet" href="${styleUri}" />
     <title>Cosmic Canvas</title>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module">${scriptSource}</script>
+    <script type="module" src="${scriptUri}"></script>
   </body>
 </html>`;
   }
-}
-
-function inlineStyleSource(source: string): string {
-  return source.replace(/<\/style/gi, "<\\/style");
-}
-
-function inlineScriptSource(source: string): string {
-  return source.replace(/<\/script/gi, "<\\/script");
 }
 
 async function replaceDocumentText(document: vscode.TextDocument, nextText: string): Promise<boolean> {
