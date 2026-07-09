@@ -98,10 +98,54 @@ function buildScriptedFixture(lineCount) {
   return `${lines.join("\n")}\n`;
 }
 
+function buildDeckFixture(slideCount) {
+  const lines = [
+    "<!doctype html>",
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    "<title>60 Slide Deck Stress Fixture</title>",
+    "<style>",
+    "body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #eef2f6; color: #1f2933; }",
+    ".deck { display: grid; gap: 24px; padding: 24px; }",
+    "section.slide { min-height: 100vh; display: grid; align-content: center; gap: 20px; padding: 56px; border: 1px solid #d7dde5; border-radius: 8px; background: #ffffff; box-shadow: 0 18px 44px rgba(31,41,51,.12); }",
+    "section.slide:nth-child(3n) { background: #eef8f6; }",
+    "section.slide:nth-child(3n + 1) { background: #fffaf2; }",
+    ".metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }",
+    ".metric { border: 1px solid #c7d0da; border-radius: 8px; padding: 16px; background: rgba(255,255,255,.72); }",
+    ".metric strong { display: block; color: #0f766e; font-size: 30px; }",
+    "</style>",
+    "</head>",
+    "<body>",
+    '<main class="deck">',
+  ];
+
+  for (let index = 1; index <= slideCount; index += 1) {
+    lines.push(
+      `<section class="slide" data-title="Stress Slide ${index}">`,
+      `<p class="eyebrow">Section ${Math.ceil(index / 10)}</p>`,
+      `<h2>Stress Slide ${index}</h2>`,
+      `<p>Timeline thumbnail and deck navigation stress content for slide ${index}.</p>`,
+      '<section class="metrics">',
+      `<div class="metric"><strong>${index * 2}%</strong><span>Completion</span></div>`,
+      `<div class="metric"><strong>${index + 12}</strong><span>Signals</span></div>`,
+      `<div class="metric"><strong>${Math.max(1, 61 - index)}</strong><span>Remaining</span></div>`,
+      "</section>",
+      "</section>",
+    );
+  }
+
+  lines.push("</main>", "</body>", "</html>");
+  return `${lines.join("\n")}\n`;
+}
+
 await mkdir(outputDir, { recursive: true });
 await writeFile(join(outputDir, "large-css-10000.html"), buildCssFixture(10000));
 await writeFile(join(outputDir, "large-scripted-100000.html"), buildScriptedFixture(100000));
+await writeFile(join(outputDir, "deck-60.html"), buildDeckFixture(60));
 
 console.log("Generated stress fixtures:");
 console.log("  public/stress-fixtures/large-css-10000.html");
 console.log("  public/stress-fixtures/large-scripted-100000.html");
+console.log("  public/stress-fixtures/deck-60.html");

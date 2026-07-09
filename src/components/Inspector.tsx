@@ -1,23 +1,70 @@
 import {
   AlignCenter,
+  AlignHorizontalDistributeCenter,
   AlignLeft,
   AlignRight,
+  Bold,
   CopyPlus,
   CornerLeftUp,
+  Heading2,
   ImageUp,
+  Italic,
+  Link,
+  List,
   MousePointer2,
   Plus,
+  Square,
   Trash2,
+  Type,
+  Unlink,
   X,
 } from "lucide-react";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { type SelectedElement } from "../protocol";
+import {
+  type ImageFitMode,
+  type InlineFormatAction,
+  type LayoutAction,
+  type SelectedElement,
+} from "../protocol";
 
 const alignButtons = [
   { label: "Left", value: "left", icon: AlignLeft },
   { label: "Center", value: "center", icon: AlignCenter },
   { label: "Right", value: "right", icon: AlignRight },
 ];
+
+const layoutButtons: Array<{ label: string; action: LayoutAction; icon: typeof AlignLeft }> = [
+  { label: "Align element left", action: "align-left", icon: AlignLeft },
+  { label: "Align element center", action: "align-center", icon: AlignCenter },
+  { label: "Align element right", action: "align-right", icon: AlignRight },
+  {
+    label: "Distribute siblings",
+    action: "distribute-horizontal",
+    icon: AlignHorizontalDistributeCenter,
+  },
+];
+
+const insertButtons = [
+  { kind: "heading", label: "Heading", icon: Heading2 },
+  { kind: "paragraph", label: "Text", icon: Type },
+  { kind: "image", label: "Image", icon: ImageUp },
+  { kind: "button", label: "Button", icon: MousePointer2 },
+  { kind: "box", label: "Box", icon: Square },
+] as const;
+
+const imageFitButtons: Array<{ fit: ImageFitMode; label: string }> = [
+  { fit: "fit", label: "Fit" },
+  { fit: "fill", label: "Fill" },
+  { fit: "crop", label: "Crop" },
+];
+
+const richTextButtons = [
+  { action: "bold", label: "Bold", icon: Bold },
+  { action: "italic", label: "Italic", icon: Italic },
+  { action: "create-link", label: "Link", icon: Link },
+  { action: "remove-link", label: "Unlink", icon: Unlink },
+  { action: "toggle-list", label: "List", icon: List },
+] as const;
 
 function numberFromCss(value: string, fallback = "") {
   const match = value.match(/-?\d+(\.\d+)?/);
@@ -72,9 +119,17 @@ type InspectorProps = {
   onAddClass: (name: string) => void;
   onRemoveClass: (name: string) => void;
   onReplaceImage: (src: string, alt?: string) => void;
+  onImageFit: (fit: ImageFitMode) => void;
+  onReplaceBackground: (src: string) => void;
+  onThemeFont: (fontFamily: string) => void;
+  onPaletteSwap: (from: string, to: string) => void;
+  onSlideBackground: (color: string) => void;
   onNudge: (dx: number, dy: number) => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onInsertElement: (kind: (typeof insertButtons)[number]["kind"]) => void;
+  onFormatInline: (action: InlineFormatAction) => void;
+  onLayout: (action: LayoutAction) => void;
 };
 
 export function Inspector({
@@ -85,15 +140,35 @@ export function Inspector({
   onAddClass,
   onRemoveClass,
   onReplaceImage,
+  onImageFit,
+  onReplaceBackground,
+  onThemeFont,
+  onPaletteSwap,
+  onSlideBackground,
   onNudge,
   onDuplicate,
   onDelete,
+  onInsertElement,
+  onFormatInline,
+  onLayout,
 }: InspectorProps) {
   const [classDraft, setClassDraft] = useState("");
   const [imageUrl, setImageUrl] = useState(selected.imageSrc);
+  const [imageAlt, setImageAlt] = useState(selected.imageAlt);
+  const [backgroundUrl, setBackgroundUrl] = useState(selected.backgroundImage);
+  const [themeFont, setThemeFont] = useState("");
+  const [paletteFrom, setPaletteFrom] = useState(selected.styles.color || "#1f2933");
+  const [paletteTo, setPaletteTo] = useState("#0f766e");
+  const [slideBackground, setSlideBackground] = useState(selected.styles.backgroundColor || "#ffffff");
   const imageFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setImageUrl(selected.imageSrc), [selected.id, selected.imageSrc]);
+  useEffect(() => setImageAlt(selected.imageAlt), [selected.id, selected.imageAlt]);
+  useEffect(() => setBackgroundUrl(selected.backgroundImage), [selected.id, selected.backgroundImage]);
+  useEffect(() => setSlideBackground(selected.styles.backgroundColor || "#ffffff"), [
+    selected.id,
+    selected.styles.backgroundColor,
+  ]);
 
   function submitClass() {
     const name = classDraft.trim();
@@ -119,7 +194,7 @@ export function Inspector({
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
-    onReplaceImage(dataUrl);
+    onReplaceImage(dataUrl, imageAlt);
   }
 
   return (
@@ -142,6 +217,32 @@ export function Inspector({
             </div>
           )}
         </label>
+        <div className="rich-text-row" aria-label="Rich text controls">
+          {richTextButtons.map(({ action, label, icon: Icon }) => (
+            <button
+              aria-label={label}
+              disabled={!selected.editableText && action !== "toggle-list"}
+              key={action}
+              onClick={() => onFormatInline(action)}
+              title={label}
+              type="button"
+            >
+              <Icon size={16} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </details>
+
+      <details className="inspector-group" open>
+        <summary>Insert</summary>
+        <div className="insert-grid" aria-label="Insert element">
+          {insertButtons.map(({ kind, label, icon: Icon }) => (
+            <button key={kind} onClick={() => onInsertElement(kind)} title={`Insert ${label}`} type="button">
+              <Icon size={15} aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
       </details>
 
       <details className="inspector-group" open>
@@ -183,11 +284,34 @@ export function Inspector({
                 placeholder="https:// or data:"
                 value={imageUrl}
                 onChange={(event) => setImageUrl(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl)}
+                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl, imageAlt)}
               />
-              <button onClick={() => onReplaceImage(imageUrl)} title="Apply image URL" type="button">
+              <button onClick={() => onReplaceImage(imageUrl, imageAlt)} title="Apply image URL" type="button">
                 Set
               </button>
+            </div>
+            <label>
+              Alt text
+              <input
+                aria-label="Image alt text"
+                value={imageAlt}
+                onBlur={() => onReplaceImage(imageUrl, imageAlt)}
+                onChange={(event) => setImageAlt(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && onReplaceImage(imageUrl, imageAlt)}
+              />
+            </label>
+            <div className="fit-row" aria-label="Image fit">
+              {imageFitButtons.map(({ fit, label }) => (
+                <button
+                  aria-pressed={selected.imageFit === fit}
+                  className={selected.imageFit === fit ? "is-active" : ""}
+                  key={fit}
+                  onClick={() => onImageFit(fit)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             <input
               ref={imageFileRef}
@@ -203,6 +327,63 @@ export function Inspector({
           </div>
         </details>
       ) : null}
+
+      {selected.canHaveBackground ? (
+        <details className="inspector-group" open>
+          <summary>Background</summary>
+          <div className="image-row">
+            <input
+              aria-label="Background image URL"
+              placeholder="https:// or data:"
+              value={backgroundUrl}
+              onChange={(event) => setBackgroundUrl(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && onReplaceBackground(backgroundUrl)}
+            />
+            <button onClick={() => onReplaceBackground(backgroundUrl)} title="Apply background" type="button">
+              Set
+            </button>
+          </div>
+        </details>
+      ) : null}
+
+      <details className="inspector-group">
+        <summary>Theme</summary>
+        <div className="theme-editor">
+          <div className="image-row">
+            <input
+              aria-label="Theme font family"
+              placeholder="Inter, system-ui, sans-serif"
+              value={themeFont}
+              onChange={(event) => setThemeFont(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && onThemeFont(themeFont)}
+            />
+            <button onClick={() => onThemeFont(themeFont)} title="Apply theme font" type="button">
+              Set
+            </button>
+          </div>
+          <div className="theme-colors">
+            <ColorField
+              label="Replace"
+              value={paletteFrom}
+              swatchFallback="#1f2933"
+              onChange={setPaletteFrom}
+            />
+            <ColorField label="With" value={paletteTo} swatchFallback="#0f766e" onChange={setPaletteTo} />
+          </div>
+          <button className="theme-action" onClick={() => onPaletteSwap(paletteFrom, paletteTo)} type="button">
+            Swap colors
+          </button>
+          <ColorField
+            label="Slide fill"
+            value={slideBackground}
+            swatchFallback="#ffffff"
+            onChange={setSlideBackground}
+          />
+          <button className="theme-action" onClick={() => onSlideBackground(slideBackground)} type="button">
+            Set slide fill
+          </button>
+        </div>
+      </details>
 
       <details className="inspector-group" open>
         <summary>Style</summary>
@@ -289,6 +470,20 @@ export function Inspector({
               onChange={(event) => onStyle({ height: event.target.value })}
             />
           </label>
+        </div>
+
+        <div className="align-row" aria-label="Element alignment">
+          {layoutButtons.map(({ label, action, icon: Icon }) => (
+            <button
+              aria-label={label}
+              key={action}
+              onClick={() => onLayout(action)}
+              title={label}
+              type="button"
+            >
+              <Icon size={17} aria-hidden="true" />
+            </button>
+          ))}
         </div>
 
         <div className="nudge-grid" aria-label="Move controls">

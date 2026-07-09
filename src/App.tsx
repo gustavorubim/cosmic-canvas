@@ -1,25 +1,61 @@
 import { ChevronRight } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DECK_HINT_MESSAGE,
+  hostDocumentChangeDelay,
+  markBeforeUnloadDirty,
+  mergeSelectionEcho,
+  shouldInstallBeforeUnload,
+  shouldShowDeckHint,
+} from "./appPolicies";
+import { CheckpointPanel } from "./components/CheckpointPanel";
 import { DataPanel } from "./components/DataPanel";
 import { DeckTimeline } from "./components/DeckTimeline";
+import { FindPanel } from "./components/FindPanel";
 import { Inspector, InspectorEmpty } from "./components/Inspector";
+import { LayerPanel } from "./components/LayerPanel";
+import { ShortcutPanel } from "./components/ShortcutPanel";
 import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
+import { ValidationPanel } from "./components/ValidationPanel";
+import {
+  type Checkpoint,
+  createCheckpoint,
+  restoreCheckpoint,
+} from "./checkpoints";
 import {
   DEFAULT_DATA_ROWS,
   normalizeDataRows,
   parseDataText,
   serializeDataRows,
 } from "./csv";
-import { cleanEditorHtml, normalizeHtmlInput, prepareEditableHtml, SAMPLE_HTML } from "./htmlDocument";
+import { type DraftRecord, draftIdFor, readDrafts, removeDraft, saveDraft } from "./drafts";
+import {
+  cleanEditorHtml,
+  createPrintHtml,
+  createSelfContainedHtml,
+  normalizeHtmlInput,
+  normalizeDeckHtml,
+  prepareEditableHtml,
+  SAMPLE_HTML,
+} from "./htmlDocument";
 import {
   type DeckSlide,
   type EditorMode,
   isBridgeMessage,
+  type AuditFinding,
+  type ChartType,
+  type ImageFitMode,
+  type InlineFormatAction,
+  type LayerItem,
+  type LayoutAction,
   type SelectedElement,
+  type SlideTemplateKind,
   type Viewport,
+  type ZOrderAction,
 } from "./protocol";
+import { KEYBOARD_SHORTCUTS } from "./shortcuts";
 import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
 
 type HistoryState = {
@@ -33,19 +69,12 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data";
+type SidePanel = "inspect" | "data" | "audit" | "find" | "layers" | "checkpoints" | "shortcuts";
 
 type Toast = {
   id: number;
   message: string;
 };
-
-type DraftPrompt = {
-  html: string;
-  savedAt: number;
-};
-
-const DRAFT_KEY = "cosmic-canvas-draft";
 
 const viewportLabels: Record<Viewport, string> = {
   desktop: "Desktop",
@@ -90,6 +119,9 @@ export default function App() {
   const lastScrollRef = useRef({ x: 0, y: 0 });
   const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const toastIdRef = useRef(0);
+  const deckHintShownRef = useRef(false);
+  const draftIdRef = useRef(draftIdFor("sample", initialHtml));
+  const draftTitleRef = useRef("Sample document");
 
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
   const [appliedHtml, setAppliedHtml] = useState(initialHtml);
@@ -100,6 +132,13 @@ export default function App() {
   const [runTrustedScripts, setRunTrustedScripts] = useState(false);
   const [sourceVisible, setSourceVisible] = useState(true);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
+  const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
+  const [layers, setLayers] = useState<LayerItem[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [checkpointName, setCheckpointName] = useState("");
+  const [findQuery, setFindQuery] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [findCount, setFindCount] = useState(0);
   const [activeSlideId, setActiveSlideId] = useState("");
   const [sidePanel, setSidePanel] = useState<SidePanel>("inspect");
   const [dataTitle, setDataTitle] = useState("Launch metrics");
@@ -111,7 +150,7 @@ export default function App() {
   });
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [draftPrompt, setDraftPrompt] = useState<DraftPrompt | null>(null);
+  const [draftPrompt, setDraftPrompt] = useState<DraftRecord[]>([]);
 
   sourceHtmlRef.current = sourceHtml;
 
@@ -167,21 +206,29 @@ export default function App() {
     if (immediate) {
       post();
     } else {
-      pendingHostChangeTimer.current = window.setTimeout(post, 250);
+      pendingHostChangeTimer.current = window.setTimeout(post, hostDocumentChangeDelay(reason));
     }
   }
 
   function renderHtml(html: string, trustedScripts = runTrustedScripts) {
     setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
     setDeckSlides([]);
+    setAuditFindings([]);
     setActiveSlideId("");
+    deckHintShownRef.current = false;
     setAppliedHtml(html);
     setFrameHtml(prepareEditableHtml(html, trustedScripts));
     setSelected(null);
   }
 
-  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts) {
+  function setDraftContext(title: string, html: string) {
+    draftTitleRef.current = title || "Untitled document";
+    draftIdRef.current = draftIdFor(draftTitleRef.current, html);
+  }
+
+  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts, title?: string) {
     const clean = normalizeEditableSource(html);
+    if (title) setDraftContext(title, clean);
     setSourceHtml(clean);
     renderHtml(clean, trustedScripts);
     if (addToHistory) pushHistory(clean);
@@ -195,6 +242,7 @@ export default function App() {
 
   function loadHostDocument(html: string) {
     const clean = normalizeEditableSource(html);
+    setDraftContext("VS Code document", clean);
     setSourceHtml(clean);
     renderHtml(clean);
     syncHistoryState({ stack: [clean], index: 0 });
@@ -240,6 +288,31 @@ export default function App() {
     postCommand("insert-slide", { id: slide.id });
   }
 
+  function insertSlideTemplate(template: SlideTemplateKind) {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    postCommand("insert-slide-template", { id: slide.id, template });
+  }
+
+  function renameDeckSlide(slide: DeckSlide, title: string) {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) return;
+    postCommand("rename-slide", { id: slide.id, title: cleanTitle });
+  }
+
+  function deleteCurrentSlide() {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    if (!window.confirm(`Delete slide "${slide.title}"?`)) return;
+    postCommand("delete-slide", { id: slide.id });
+  }
+
+  function moveCurrentSlide(offset: number) {
+    const slide = deckSlides[activeSlideIndex];
+    if (!slide) return;
+    postCommand("move-slide", { id: slide.id, offset });
+  }
+
   function updateDataCell(rowIndex: number, cellIndex: number, value: string) {
     setDataRows((current) => {
       const next = normalizeDataRows(current).map((row) => [...row]);
@@ -273,6 +346,14 @@ export default function App() {
     postCommand("insert-table", { columns, rows, title: dataTitle.trim() });
   }
 
+  function insertDataChart(chartType: ChartType) {
+    const normalized = normalizeDataRows(dataRows);
+    const columns = normalized[0].map((cell, index) => cell.trim() || `Column ${index + 1}`);
+    const rows = normalized.slice(1).filter((row) => row.some((cell) => cell.trim() !== ""));
+    if (!rows.length) return;
+    postCommand("insert-chart", { chartType, columns, rows, title: dataTitle.trim() });
+  }
+
   function updateSelectedStyle(styles: Record<string, string>) {
     postCommand("apply-style", { styles });
   }
@@ -280,6 +361,74 @@ export default function App() {
   function updateSelectedText(text: string) {
     setSelected((current) => (current ? { ...current, text } : current));
     postCommand("set-text", { text });
+  }
+
+  function formatInline(action: InlineFormatAction) {
+    if (action === "create-link") {
+      const href = window.prompt("Link URL", "https://");
+      if (href === null) return;
+      postCommand("format-inline", { action, href });
+      return;
+    }
+    postCommand("format-inline", { action });
+  }
+
+  function updateSelectedLayout(action: LayoutAction) {
+    postCommand("layout", { action });
+  }
+
+  function updateImageFit(fit: ImageFitMode) {
+    postCommand("set-image-fit", { fit });
+  }
+
+  function updateBackground(src: string) {
+    postCommand("replace-background", { src });
+  }
+
+  function updateThemeFont(fontFamily: string) {
+    postCommand("set-theme-font", { fontFamily });
+  }
+
+  function swapThemeColor(from: string, to: string) {
+    postCommand("swap-theme-color", { from, to });
+  }
+
+  function updateSlideBackground(color: string) {
+    postCommand("set-slide-background", { color });
+  }
+
+  function findInDocument() {
+    postCommand("find-text", { query: findQuery });
+  }
+
+  function replaceInDocument() {
+    postCommand("replace-text", { query: findQuery, replacement: replaceText });
+  }
+
+  function updateZOrder(action: ZOrderAction) {
+    postCommand("z-order", { action });
+  }
+
+  function createNamedCheckpoint() {
+    const next = createCheckpoint(checkpoints, sourceHtmlRef.current, checkpointName);
+    setCheckpoints(next);
+    setCheckpointName("");
+    showToast(`Checkpoint created: ${next[0].name}`);
+  }
+
+  function restoreCheckpointById(id: string) {
+    const html = restoreCheckpoint(checkpoints, id);
+    if (!html) return;
+    loadHtml(html);
+    postHostDocumentChange(html, "checkpoint", true);
+    showToast("Checkpoint restored");
+  }
+
+  function normalizeCurrentDeck() {
+    const normalized = normalizeDeckHtml(sourceHtmlRef.current);
+    loadHtml(normalized);
+    postHostDocumentChange(normalized, "normalize", true);
+    showToast("Deck normalized");
   }
 
   function stepHistory(offset: number) {
@@ -313,7 +462,7 @@ export default function App() {
         });
         fileHandleRef.current = handle;
         const file = await handle.getFile();
-        loadHtml(await file.text());
+        loadHtml(await file.text(), true, runTrustedScripts, file.name);
         showToast(`Opened ${file.name}`);
         return;
       } catch (error) {
@@ -328,17 +477,17 @@ export default function App() {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
     fileHandleRef.current = null;
-    loadHtml(await file.text());
+    loadHtml(await file.text(), true, runTrustedScripts, file.name);
     showToast(`Opened ${file.name}`);
     event.currentTarget.value = "";
   }
 
-  function downloadCleanHtml(clean: string) {
+  function downloadCleanHtml(clean: string, suffix = "") {
     const blob = new Blob([clean], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = fileNameFromDate();
+    anchor.download = suffix ? fileNameFromDate().replace(/\.html$/, `-${suffix}.html`) : fileNameFromDate();
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -397,17 +546,42 @@ export default function App() {
     showToast("Downloaded HTML copy");
   }
 
-  function restoreDraft() {
-    if (!draftPrompt) return;
-    loadHtml(draftPrompt.html);
-    setDraftPrompt(null);
-    showToast("Draft restored");
+  async function downloadSelfContainedHtml() {
+    const result = await createSelfContainedHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "download", html: result.html });
+    } else {
+      downloadCleanHtml(result.html, "self-contained");
+    }
+    showToast(
+      result.failures.length
+        ? `Downloaded with ${result.failures.length} image${result.failures.length === 1 ? "" : "s"} still external`
+        : "Downloaded self-contained HTML",
+    );
   }
 
-  function discardDraft() {
-    setDraftPrompt(null);
+  function downloadPrintHtml() {
+    const printable = createPrintHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "download", html: printable });
+      return;
+    }
+    downloadCleanHtml(printable, "print");
+    showToast("Downloaded print HTML");
+  }
+
+  function restoreDraft(draft: DraftRecord) {
+    setDraftContext(draft.title, draft.html);
+    loadHtml(draft.html);
+    setDraftPrompt([]);
+    showToast(`Draft restored: ${draft.title}`);
+  }
+
+  function discardDraft(id?: string) {
+    const targetId = id || draftPrompt[0]?.id;
+    setDraftPrompt((current) => current.filter((draft) => draft.id !== targetId));
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      if (targetId) removeDraft(localStorage, targetId);
     } catch {
       // Best-effort cleanup.
     }
@@ -434,12 +608,42 @@ export default function App() {
       }
 
       if (data.type === "wysiwyg-selection") {
-        setSelected(data.selected);
+        const active = document.activeElement;
+        const editingInspectorText =
+          active instanceof HTMLElement && Boolean(active.closest(".text-control"));
+        setSelected((current) => {
+          return mergeSelectionEcho(current, data.selected, editingInspectorText);
+        });
       }
 
       if (data.type === "wysiwyg-deck") {
         setDeckSlides(data.slides);
         setActiveSlideId(data.activeId);
+        if (shouldShowDeckHint(data.slides.length, deckHintShownRef.current)) {
+          deckHintShownRef.current = true;
+          showToast(DECK_HINT_MESSAGE);
+        }
+      }
+
+      if (data.type === "wysiwyg-layers") {
+        setLayers(data.layers);
+      }
+
+      if (data.type === "wysiwyg-audit") {
+        setAuditFindings(data.findings);
+      }
+
+      if (data.type === "wysiwyg-find") {
+        setFindQuery(data.query);
+        setFindCount(data.count);
+      }
+
+      if (data.type === "wysiwyg-shortcut") {
+        const actions = actionsRef.current;
+        if (data.action === "save") void actions.saveToFile();
+        if (data.action === "apply-source") actions.applySource();
+        if (data.action === "undo") actions.stepHistory(-1);
+        if (data.action === "redo") actions.stepHistory(1);
       }
 
       if (data.type === "wysiwyg-document-change") {
@@ -448,7 +652,7 @@ export default function App() {
         setSourceHtml(clean);
         setAppliedHtml(clean);
         scheduleHistory(clean);
-        postHostDocumentChange(clean, data.reason);
+        postHostDocumentChange(clean, data.reason, data.reason === "blur");
       }
     }
 
@@ -535,13 +739,27 @@ export default function App() {
     if (sourceHtml === initialHtml) return;
     const id = window.setTimeout(() => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ html: sourceHtml, savedAt: Date.now() }));
+        saveDraft(localStorage, {
+          id: draftIdRef.current,
+          title: draftTitleRef.current,
+          html: sourceHtml,
+          savedAt: Date.now(),
+        });
       } catch {
         // Storage may be unavailable (private mode / quota); drafts are best-effort.
       }
     }, 700);
     return () => window.clearTimeout(id);
   }, [sourceHtml, initialHtml]);
+
+  useEffect(() => {
+    if (!shouldInstallBeforeUnload(isVsCode, sourceDirty)) return;
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      return markBeforeUnloadDirty(event);
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [isVsCode, sourceDirty]);
 
   useEffect(() => {
     if (didLoadUrlRef.current) return;
@@ -558,17 +776,13 @@ export default function App() {
           if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
           return response.text();
         })
-        .then((html) => loadHtml(html, true, trusted))
+        .then((html) => loadHtml(html, true, trusted, loadUrl))
         .catch((error: unknown) => console.error(error));
       return;
     }
 
     try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { html?: string; savedAt?: number };
-      if (typeof draft.html !== "string" || !draft.html.trim()) return;
-      setDraftPrompt({ html: draft.html, savedAt: draft.savedAt ?? 0 });
+      setDraftPrompt(readDrafts(localStorage));
     } catch {
       // Ignore malformed drafts.
     }
@@ -590,6 +804,9 @@ export default function App() {
         saveTitle={saveTitle}
         onCopy={copyHtml}
         onDownload={downloadHtml}
+        onDownloadSelfContained={() => void downloadSelfContainedHtml()}
+        onDownloadPrint={downloadPrintHtml}
+        onNormalize={normalizeCurrentDeck}
       />
 
       <Toolbar
@@ -609,18 +826,23 @@ export default function App() {
         onViewport={setViewport}
       />
 
-      {draftPrompt ? (
+      {draftPrompt.length ? (
         <div className="draft-banner" role="alert">
-          <span>
-            Unsaved draft from{" "}
-            {draftPrompt.savedAt ? new Date(draftPrompt.savedAt).toLocaleString() : "your last session"}
-          </span>
-          <button className="button primary" type="button" onClick={restoreDraft}>
-            Restore
-          </button>
-          <button className="button secondary" type="button" onClick={discardDraft}>
-            Discard
-          </button>
+          <span>Recent drafts</span>
+          <div className="draft-list">
+            {draftPrompt.slice(0, 3).map((draft) => (
+              <div className="draft-item" key={draft.id}>
+                <strong>{draft.title}</strong>
+                <em>{draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "Unknown time"}</em>
+                <button className="button primary" type="button" onClick={() => restoreDraft(draft)}>
+                  Restore
+                </button>
+                <button className="button secondary" type="button" onClick={() => discardDraft(draft.id)}>
+                  Discard
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -632,9 +854,14 @@ export default function App() {
           onShow={() => setSourceVisible(true)}
           dirty={sourceDirty}
           onApply={applySource}
+          selected={selected}
         />
 
-        <section className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`} aria-label="Rendered HTML">
+        <section
+          aria-label="Rendered HTML"
+          className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`}
+          data-mode={mode}
+        >
           <div className="pane-title">
             <span className="pane-title-left">
               Canvas
@@ -652,7 +879,9 @@ export default function App() {
               sandbox={
                 isVsCode
                   ? "allow-scripts allow-downloads"
-                  : "allow-scripts allow-same-origin allow-downloads"
+                  : runTrustedScripts
+                    ? "allow-scripts allow-downloads"
+                    : "allow-scripts allow-same-origin allow-downloads"
               }
               srcDoc={frameHtml}
               title="Editable HTML preview"
@@ -683,6 +912,10 @@ export default function App() {
               onStep={stepDeckSlide}
               onDuplicate={duplicateCurrentSlide}
               onInsert={insertSlideAfterCurrent}
+              onRename={renameDeckSlide}
+              onDelete={deleteCurrentSlide}
+              onMove={moveCurrentSlide}
+              onTemplate={insertSlideTemplate}
             />
           ) : null}
         </section>
@@ -700,13 +933,46 @@ export default function App() {
               <button aria-pressed={sidePanel === "data"} onClick={() => setSidePanel("data")} type="button">
                 Data
               </button>
+              <button aria-pressed={sidePanel === "audit"} onClick={() => setSidePanel("audit")} type="button">
+                Audit
+              </button>
+              <button aria-pressed={sidePanel === "find"} onClick={() => setSidePanel("find")} type="button">
+                Find
+              </button>
+              <button aria-pressed={sidePanel === "layers"} onClick={() => setSidePanel("layers")} type="button">
+                Layers
+              </button>
+              <button
+                aria-pressed={sidePanel === "checkpoints"}
+                onClick={() => setSidePanel("checkpoints")}
+                type="button"
+              >
+                Saves
+              </button>
+              <button
+                aria-pressed={sidePanel === "shortcuts"}
+                onClick={() => setSidePanel("shortcuts")}
+                type="button"
+              >
+                Keys
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
                 ? selected
                   ? selected.tagName
                   : "None"
-                : `${Math.max(0, dataRows.length - 1)} rows`}
+                : sidePanel === "data"
+                  ? `${Math.max(0, dataRows.length - 1)} rows`
+                  : sidePanel === "find"
+                    ? `${findCount} matches`
+                    : sidePanel === "layers"
+                      ? `${layers.length} layers`
+                      : sidePanel === "checkpoints"
+                        ? `${checkpoints.length} saved`
+                        : sidePanel === "shortcuts"
+                          ? `${KEYBOARD_SHORTCUTS.length} shortcuts`
+                          : `${auditFindings.length} issues`}
             </span>
           </div>
 
@@ -722,7 +988,45 @@ export default function App() {
               onAddRow={addDataRow}
               onAddColumn={addDataColumn}
               onInsert={insertDataTable}
+              onInsertChart={insertDataChart}
             />
+          ) : sidePanel === "audit" ? (
+            <ValidationPanel
+              findings={auditFindings}
+              onSelect={(elementId) => {
+                setSidePanel("inspect");
+                postCommand("select", { id: elementId });
+              }}
+            />
+          ) : sidePanel === "find" ? (
+            <FindPanel
+              query={findQuery}
+              replacement={replaceText}
+              count={findCount}
+              onQuery={setFindQuery}
+              onReplacement={setReplaceText}
+              onFind={findInDocument}
+              onReplace={replaceInDocument}
+            />
+          ) : sidePanel === "layers" ? (
+            <LayerPanel
+              layers={layers}
+              onSelect={(id) => {
+                setSidePanel("inspect");
+                postCommand("select", { id });
+              }}
+              onZOrder={updateZOrder}
+            />
+          ) : sidePanel === "checkpoints" ? (
+            <CheckpointPanel
+              checkpoints={checkpoints}
+              name={checkpointName}
+              onName={setCheckpointName}
+              onCreate={createNamedCheckpoint}
+              onRestore={restoreCheckpointById}
+            />
+          ) : sidePanel === "shortcuts" ? (
+            <ShortcutPanel />
           ) : selected ? (
             <Inspector
               selected={selected}
@@ -732,9 +1036,17 @@ export default function App() {
               onAddClass={(name) => postCommand("set-class", { className: name, action: "add" })}
               onRemoveClass={(name) => postCommand("set-class", { className: name, action: "remove" })}
               onReplaceImage={(src, alt) => postCommand("replace-image", { src, alt })}
+              onImageFit={updateImageFit}
+              onReplaceBackground={updateBackground}
+              onThemeFont={updateThemeFont}
+              onPaletteSwap={swapThemeColor}
+              onSlideBackground={updateSlideBackground}
               onNudge={(dx, dy) => postCommand("nudge", { dx, dy })}
               onDuplicate={() => postCommand("duplicate")}
               onDelete={() => postCommand("delete")}
+              onInsertElement={(kind) => postCommand("insert-element", { kind })}
+              onFormatInline={formatInline}
+              onLayout={updateSelectedLayout}
             />
           ) : (
             <InspectorEmpty />
