@@ -90,6 +90,10 @@ function latestAuditMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-audit").at(-1);
 }
 
+function latestFindMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-find").at(-1);
+}
+
 function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   target.dispatchEvent(
     new win.MouseEvent("click", {
@@ -809,6 +813,43 @@ describe("data chart insertion", () => {
     expect(figure).not.toBeNull();
     expect(figure.querySelectorAll(selector).length).toBeGreaterThan(0);
     expect(figure.querySelector("svg")?.getAttribute("role")).toBe("img");
+  });
+});
+
+describe("find and replace", () => {
+  it("highlights rendered text matches and unwraps highlights on export", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><head><title>Find</title></head><body>
+        <main><p>Alpha beta Alpha</p><a href="/Alpha">Alpha link</a></main>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    postCommand(win, { command: "find-text", query: "Alpha" });
+
+    expect(latestFindMessage(messages)).toMatchObject({ query: "Alpha", count: 3 });
+    expect(win.document.querySelectorAll("mark[data-wysiwyg-find]")).toHaveLength(3);
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).toContain("Alpha beta Alpha");
+    expect(cleaned).not.toContain("data-wysiwyg-find");
+  });
+
+  it("replaces text nodes without touching attributes", () => {
+    const { win } = createWindow(`
+      <!doctype html><html><head><title>Replace</title></head><body>
+        <main><p>Alpha beta Alpha</p><a id="link" href="/Alpha">Alpha link</a></main>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    postCommand(win, { command: "replace-text", query: "Alpha", replacement: "Omega" });
+
+    expect(win.document.body.textContent).toContain("Omega beta Omega");
+    expect(win.document.body.textContent).not.toContain("Alpha link");
+    expect(win.document.getElementById("link")?.getAttribute("href")).toBe("/Alpha");
   });
 });
 

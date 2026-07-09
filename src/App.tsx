@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DataPanel } from "./components/DataPanel";
 import { DeckTimeline } from "./components/DeckTimeline";
+import { FindPanel } from "./components/FindPanel";
 import { Inspector, InspectorEmpty } from "./components/Inspector";
 import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
@@ -48,7 +49,7 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data" | "audit";
+type SidePanel = "inspect" | "data" | "audit" | "find";
 
 type Toast = {
   id: number;
@@ -112,6 +113,9 @@ export default function App() {
   const [sourceVisible, setSourceVisible] = useState(true);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
   const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
+  const [findQuery, setFindQuery] = useState("");
+  const [replaceText, setReplaceText] = useState("");
+  const [findCount, setFindCount] = useState(0);
   const [activeSlideId, setActiveSlideId] = useState("");
   const [sidePanel, setSidePanel] = useState<SidePanel>("inspect");
   const [dataTitle, setDataTitle] = useState("Launch metrics");
@@ -371,6 +375,14 @@ export default function App() {
     postCommand("set-slide-background", { color });
   }
 
+  function findInDocument() {
+    postCommand("find-text", { query: findQuery });
+  }
+
+  function replaceInDocument() {
+    postCommand("replace-text", { query: findQuery, replacement: replaceText });
+  }
+
   function stepHistory(offset: number) {
     const current = historyRef.current;
     const nextIndex = current.index + offset;
@@ -575,6 +587,11 @@ export default function App() {
 
       if (data.type === "wysiwyg-audit") {
         setAuditFindings(data.findings);
+      }
+
+      if (data.type === "wysiwyg-find") {
+        setFindQuery(data.query);
+        setFindCount(data.count);
       }
 
       if (data.type === "wysiwyg-shortcut") {
@@ -875,6 +892,9 @@ export default function App() {
               <button aria-pressed={sidePanel === "audit"} onClick={() => setSidePanel("audit")} type="button">
                 Audit
               </button>
+              <button aria-pressed={sidePanel === "find"} onClick={() => setSidePanel("find")} type="button">
+                Find
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
@@ -883,7 +903,9 @@ export default function App() {
                   : "None"
                 : sidePanel === "data"
                   ? `${Math.max(0, dataRows.length - 1)} rows`
-                  : `${auditFindings.length} issues`}
+                  : sidePanel === "find"
+                    ? `${findCount} matches`
+                    : `${auditFindings.length} issues`}
             </span>
           </div>
 
@@ -908,6 +930,16 @@ export default function App() {
                 setSidePanel("inspect");
                 postCommand("select", { id: elementId });
               }}
+            />
+          ) : sidePanel === "find" ? (
+            <FindPanel
+              query={findQuery}
+              replacement={replaceText}
+              count={findCount}
+              onQuery={setFindQuery}
+              onReplacement={setReplaceText}
+              onFind={findInDocument}
+              onReplace={replaceInDocument}
             />
           ) : selected ? (
             <Inspector

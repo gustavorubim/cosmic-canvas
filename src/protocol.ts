@@ -76,6 +76,7 @@ export type BridgeMessage =
   | { type: "wysiwyg-selection"; selected: SelectedElement | null }
   | { type: "wysiwyg-deck"; slides: DeckSlide[]; activeId: string }
   | { type: "wysiwyg-audit"; findings: AuditFinding[] }
+  | { type: "wysiwyg-find"; query: string; count: number }
   | { type: "wysiwyg-shortcut"; action: "save" | "apply-source" | "undo" | "redo" }
   | {
       type: "wysiwyg-document-change";
@@ -99,6 +100,8 @@ export type BridgeCommand =
   | { command: "set-theme-font"; fontFamily: string }
   | { command: "swap-theme-color"; from: string; to: string }
   | { command: "set-slide-background"; color: string }
+  | { command: "find-text"; query: string }
+  | { command: "replace-text"; query: string; replacement: string }
   | { command: "duplicate" }
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }
@@ -127,6 +130,7 @@ export const BRIDGE_MESSAGE_TYPES = [
   "wysiwyg-selection",
   "wysiwyg-deck",
   "wysiwyg-audit",
+  "wysiwyg-find",
   "wysiwyg-shortcut",
   "wysiwyg-document-change",
 ] as const;

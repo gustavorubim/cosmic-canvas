@@ -920,6 +920,61 @@ button:disabled {
   gap: 8px;
 }
 
+.find-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.find-panel label {
+  display: grid;
+  gap: 6px;
+  color: #52606d;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.find-panel input {
+  width: 100%;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid #c7d0da;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+}
+
+.find-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.find-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-weight: 700;
+}
+
+.find-actions .primary {
+  border-color: #0f766e;
+  color: #ffffff;
+  background: #0f766e;
+}
+
+.find-panel small {
+  color: #66788a;
+  font-size: 12px;
+}
+
 .validation-finding {
   display: grid;
   grid-template-columns: auto 1fr;

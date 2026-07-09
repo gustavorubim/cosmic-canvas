@@ -313,6 +313,13 @@ function restoreInlineHandlers(doc: Document) {
 }
 
 function removeEditorArtifacts(doc: Document) {
+  doc.querySelectorAll("mark[data-wysiwyg-find]").forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) return;
+    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+    mark.remove();
+    parent.normalize();
+  });
   doc.querySelectorAll("[data-wysiwyg-editor='true']").forEach((element) => element.remove());
   doc.querySelectorAll("[data-wysiwyg-id]").forEach((element) => element.removeAttribute("data-wysiwyg-id"));
   doc.querySelectorAll("[data-wysiwyg-hover]").forEach((element) => element.removeAttribute("data-wysiwyg-hover"));

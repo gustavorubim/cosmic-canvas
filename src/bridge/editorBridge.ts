@@ -827,6 +827,84 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     publishChange("slide-background");
   }
 
+  function clearFindHighlights() {
+    document.querySelectorAll("mark[data-wysiwyg-find]").forEach((mark) => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      mark.remove();
+      parent.normalize();
+    });
+  }
+
+  function editableTextNodes() {
+    const walker = document.createTreeWalker(document.body, win.NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    let node = walker.nextNode();
+    while (node) {
+      const parent = node.parentElement;
+      if (
+        parent &&
+        node.textContent &&
+        !parent.closest("script, style, [data-wysiwyg-editor='true'], mark[data-wysiwyg-find]")
+      ) {
+        nodes.push(node as Text);
+      }
+      node = walker.nextNode();
+    }
+    return nodes;
+  }
+
+  function highlightFindText(queryValue: unknown) {
+    clearFindHighlights();
+    const query = String(queryValue || "");
+    if (!query) {
+      post("wysiwyg-find", { query, count: 0 });
+      return;
+    }
+    let count = 0;
+    const needle = query.toLowerCase();
+    editableTextNodes().forEach((node) => {
+      const text = node.textContent || "";
+      const lower = text.toLowerCase();
+      let index = 0;
+      let match = lower.indexOf(needle, index);
+      if (match < 0) return;
+      const fragment = document.createDocumentFragment();
+      while (match >= 0) {
+        if (match > index) fragment.append(document.createTextNode(text.slice(index, match)));
+        const mark = document.createElement("mark");
+        mark.dataset.wysiwygFind = "true";
+        mark.textContent = text.slice(match, match + query.length);
+        fragment.append(mark);
+        count += 1;
+        index = match + query.length;
+        match = lower.indexOf(needle, index);
+      }
+      if (index < text.length) fragment.append(document.createTextNode(text.slice(index)));
+      node.replaceWith(fragment);
+    });
+    const first = document.querySelector("mark[data-wysiwyg-find]");
+    first?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    post("wysiwyg-find", { query, count });
+  }
+
+  function replaceTextNodes(queryValue: unknown, replacementValue: unknown) {
+    clearFindHighlights();
+    const query = String(queryValue || "");
+    if (!query) return;
+    const replacement = String(replacementValue || "");
+    let changed = false;
+    editableTextNodes().forEach((node) => {
+      const text = node.textContent || "";
+      if (!text.includes(query)) return;
+      node.textContent = text.split(query).join(replacement);
+      changed = true;
+    });
+    if (changed) publishChange("replace-text");
+    highlightFindText(replacement || query);
+  }
+
   function duplicateSelected() {
     if (!selectedElement || !selectedElement.parentElement || selectedElement === document.body) return;
     const clone = selectedElement.cloneNode(true) as Element;
@@ -2008,6 +2086,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "set-theme-font") setThemeFont(data.fontFamily);
     if (data.command === "swap-theme-color") swapThemeColor(data.from, data.to);
     if (data.command === "set-slide-background") setSlideBackground(data.color);
+    if (data.command === "find-text") highlightFindText(data.query);
+    if (data.command === "replace-text") replaceTextNodes(data.query, data.replacement);
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);
