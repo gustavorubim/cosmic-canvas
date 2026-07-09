@@ -1,8 +1,13 @@
 import {
   canDirectlyEditTextElement,
+  collectDeckSlides,
+  deckSlideSelector,
+  editableTextTarget,
   inTypingContextForElement,
   installEditorBridge,
   installKeyboardFence,
+  isRevealStackElement,
+  isSlidePartElement,
 } from "./bridge/editorBridge";
 
 const NONE = "__wysiwyg_none__";
@@ -466,7 +471,17 @@ function bridgeHelperSource() {
     `const NONE = ${JSON.stringify(NONE)};`,
     inTypingContextForElement.toString(),
     canDirectlyEditTextElement.toString(),
+    editableTextTarget.toString(),
+    deckSlideSelectorListSource(),
+    deckSlideSelector.toString(),
+    isRevealStackElement.toString(),
+    isSlidePartElement.toString(),
+    collectDeckSlides.toString(),
   ].join("\n");
+}
+
+function deckSlideSelectorListSource() {
+  return `function deckSlideSelectorList() { return ${JSON.stringify(deckSlideSelector().split(", "))}; }`;
 }
 
 function keyboardFenceScriptTag() {
@@ -516,6 +531,11 @@ export type CleanOptions = {
 
 type FetchLike = (input: RequestInfo | URL) => Promise<Response>;
 
+const PRINT_SLIDE_SELECTOR = deckSlideSelector();
+const PRINT_LAST_SLIDE_SELECTOR = PRINT_SLIDE_SELECTOR.split(", ")
+  .map((selector) => `${selector}:last-child`)
+  .join(",\n  ");
+
 const PRINT_EXPORT_STYLE = `
 @media print {
   body {
@@ -523,26 +543,14 @@ const PRINT_EXPORT_STYLE = `
     background: #ffffff !important;
   }
 
-  section.slide,
-  article.slide,
-  section[data-title],
-  section[data-section],
-  [data-slide],
-  [data-slide-id],
-  .reveal .slides > section,
-  .reveal .slides > section > section {
+  ${PRINT_SLIDE_SELECTOR} {
     min-height: 100vh;
     page-break-after: always;
     break-after: page;
     box-shadow: none !important;
   }
 
-  section.slide:last-child,
-  article.slide:last-child,
-  section[data-title]:last-child,
-  section[data-section]:last-child,
-  [data-slide]:last-child,
-  [data-slide-id]:last-child {
+  ${PRINT_LAST_SLIDE_SELECTOR} {
     page-break-after: auto;
     break-after: auto;
   }
@@ -554,39 +562,11 @@ const PRINT_EXPORT_STYLE = `
 }
 `;
 
-const DECK_SLIDE_SELECTORS = [
-  "section.slide",
-  "article.slide",
-  "section[data-title]",
-  "section[data-section]",
-  "[data-slide]",
-  "[data-slide-id]",
-  ".reveal .slides > section",
-  ".reveal .slides > section > section",
-];
-
 const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
 const EMPTY_NORMALIZE_TAGS = new Set(["p", "span", "div", "li", "strong", "em", "b", "i", "u", "small", "mark"]);
 
-function isRevealStackForNormalize(element: Element) {
-  return (
-    element.matches(".reveal .slides > section") &&
-    Array.from(element.children).some((child) => child.tagName.toLowerCase() === "section")
-  );
-}
-
 function deckSlides(doc: Document) {
-  const seen = new Set<Element>();
-  const slides: Element[] = [];
-  for (const selector of DECK_SLIDE_SELECTORS) {
-    doc.querySelectorAll(selector).forEach((element) => {
-      if (isRevealStackForNormalize(element)) return;
-      if (seen.has(element)) return;
-      seen.add(element);
-      slides.push(element);
-    });
-  }
-  return slides;
+  return collectDeckSlides(doc);
 }
 
 function renameElement(doc: Document, element: Element, tagName: string) {

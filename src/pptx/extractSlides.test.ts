@@ -37,6 +37,23 @@ describe("extractPptxSlides", () => {
     ]);
   });
 
+  it("detects common generated deck wrappers beyond section.slide", () => {
+    const doc = parse(`<!doctype html><html><body>
+      <main class="slides">
+        <div class="slide"><h1>Div class slide</h1></div>
+        <article class="deck-slide" data-title="Deck article"><h2>Deck article</h2></article>
+        <section aria-roledescription="slide" aria-label="Aria slide"><h2>Ignored heading</h2></section>
+        <div class="slide-body"><h2>Not a slide part</h2></div>
+      </main>
+    </body></html>`);
+
+    expect(extractPptxSlides(doc).map((slide) => slide.title)).toEqual([
+      "Div class slide",
+      "Deck article",
+      "Aria slide",
+    ]);
+  });
+
   it("falls back to a page export candidate when no deck is detected", () => {
     const slides = extractPptxSlides(parse("<main><h1>One page</h1><p>Export me</p></main>"));
 

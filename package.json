@@ -2,7 +2,7 @@
   "name": "cosmic-canvas",
   "displayName": "Cosmic Canvas",
   "description": "A WYSIWYG custom editor for polishing HTML documents.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "local",
   "private": true,
   "license": "MIT",

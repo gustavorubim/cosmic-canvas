@@ -4,6 +4,8 @@ import { HOSTILE_DECK_HTML, installHostileDeckNavigation, REVEAL_DECK_HTML } fro
 import { cleanEditorHtml, prepareEditableHtml, SAMPLE_HTML } from "../htmlDocument";
 import {
   canDirectlyEditTextElement,
+  collectDeckSlides,
+  editableTextTarget,
   inTypingContextForElement,
   installEditorBridge,
   installKeyboardFence,
@@ -183,6 +185,36 @@ describe("bridge helpers", () => {
     expect(canDirectlyEditTextElement(win.document.getElementById("inline"))).toBe(true);
     expect(canDirectlyEditTextElement(win.document.getElementById("slide"))).toBe(false);
     expect(canDirectlyEditTextElement(win.document.getElementById("blocks"))).toBe(false);
+  });
+
+  it("finds a safe text child for compact wrapper selections", () => {
+    const { win } = createWindow(`
+      <div id="wrapper" class="slide-body">
+        <h1 id="headline">Executive title</h1>
+        <p>Supporting line</p>
+      </div>
+      <section id="complex"><h2>One</h2><p>Two</p><p>Three</p><p>Four</p></section>
+    `);
+
+    expect(editableTextTarget(win.document.getElementById("wrapper"))?.id).toBe("headline");
+    expect(editableTextTarget(win.document.getElementById("complex"))).toBeNull();
+  });
+
+  it("collects slides from common generated HTML layouts", () => {
+    const { win } = createWindow(`
+      <main class="slides">
+        <div id="div-slide" class="slide"><h1>Div slide</h1></div>
+        <article id="deck-slide" class="deck-slide"><h2>Deck slide</h2></article>
+        <section id="aria-slide" aria-roledescription="slide"><h2>Aria slide</h2></section>
+        <div id="body" class="slide-body"><h2>Inner wrapper</h2></div>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document).map((slide) => slide.id)).toEqual([
+      "div-slide",
+      "deck-slide",
+      "aria-slide",
+    ]);
   });
 });
 
@@ -380,6 +412,37 @@ describe("editor key semantics", () => {
       editableText: false,
     });
     expect(slide.hasAttribute("contenteditable")).toBe(false);
+  });
+
+  it("edits a wrapper's primary text child from inspector text commands", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><body>
+        <div class="slide">
+          <div id="body" class="slide-body">
+            <h1 id="headline">Old headline</h1>
+            <p id="supporting">Supporting line</p>
+          </div>
+        </div>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    const body = win.document.getElementById("body") as Element;
+
+    click(win, body);
+
+    expect(latestSelectionMessage(messages).selected).toMatchObject({
+      id: body.getAttribute("data-wysiwyg-id"),
+      text: "Old headline",
+      childElementCount: 2,
+      editableText: true,
+    });
+
+    postCommand(win, { command: "set-text", text: "New headline" });
+
+    expect(win.document.getElementById("headline")?.textContent).toBe("New headline");
+    expect(win.document.getElementById("supporting")?.textContent).toBe("Supporting line");
+    expect(body.children).toHaveLength(2);
   });
 
   it("treats Escape as an editing ladder", () => {

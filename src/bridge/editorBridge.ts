@@ -102,6 +102,123 @@ export function canDirectlyEditTextElement(element: Element | null): boolean {
   return allInline(element);
 }
 
+export function editableTextTarget(element: Element | null): Element | null {
+  if (!element) return null;
+  if (canDirectlyEditTextElement(element)) return element;
+  if (["html", "head", "body", "script", "style"].includes(element.tagName.toLowerCase())) return null;
+  if (element.matches(deckSlideSelector()) && !isSlidePartElement(element)) return null;
+
+  const directChildren = Array.from(element.children).filter((child) => {
+    return (child as HTMLElement).dataset?.wysiwygEditor !== "true";
+  });
+  const directTextChildren = directChildren.filter((child) => {
+    return canDirectlyEditTextElement(child) && (child.textContent || "").trim() !== "";
+  });
+  const directHeading = directTextChildren.find((child) => /^h[1-6]$/i.test(child.tagName));
+  if (directHeading && directChildren.length <= 3) return directHeading;
+  if (directTextChildren.length === 1) return directTextChildren[0];
+
+  const candidates = Array.from(
+    element.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, figcaption, blockquote, button, a, span"),
+  ).filter((child) => {
+    return (
+      !child.closest('[data-wysiwyg-editor="true"]') &&
+      canDirectlyEditTextElement(child) &&
+      (child.textContent || "").trim() !== ""
+    );
+  });
+  if (candidates.length === 1) return candidates[0];
+
+  const heading = candidates.find((child) => /^h[1-6]$/i.test(child.tagName));
+  if (heading && directChildren.length <= 3) return heading;
+
+  return null;
+}
+
+export function deckSlideSelectorList() {
+  return [
+    ".slide",
+    ".deck-slide",
+    ".presentation-slide",
+    ".ppt-slide",
+    ".pptx-slide",
+    ".powerpoint-slide",
+    "[data-slide]",
+    "[data-slide-id]",
+    "[data-page]",
+    "[data-page-id]",
+    "[aria-roledescription='slide']",
+    ".reveal .slides > section",
+    ".reveal .slides > section > section",
+    ".slides > section",
+    ".slides > article",
+    ".slides > div",
+    ".deck > section",
+    ".deck > article",
+    ".deck > div",
+    ".presentation > section",
+    ".presentation > article",
+    ".presentation > div",
+    "[data-deck] > section",
+    "[data-deck] > article",
+    "[data-deck] > div",
+    "[data-presentation] > section",
+    "[data-presentation] > article",
+    "[data-presentation] > div",
+  ];
+}
+
+export function deckSlideSelector() {
+  return deckSlideSelectorList().join(", ");
+}
+
+export function isRevealStackElement(element: Element) {
+  return (
+    element.matches(".reveal .slides > section") &&
+    Array.from(element.children).some((child) => child.tagName.toLowerCase() === "section")
+  );
+}
+
+export function isSlidePartElement(element: Element) {
+  const classList = Array.from(element.classList).map((name) => name.toLowerCase());
+  if (classList.includes("slide")) return false;
+  return classList.some((name) => {
+    return /(^|[-_])(body|content|headline|heading|title|subtitle|text|copy|image|media|header|footer|number|logo)([-_]|$)/.test(
+      name,
+    );
+  });
+}
+
+export function collectDeckSlides(root: ParentNode) {
+  const seen = new Set<Element>();
+  const slides: Element[] = [];
+
+  function addSlide(element: Element) {
+    if ((element as HTMLElement).dataset?.wysiwygEditor === "true") return;
+    if (element.closest('[data-wysiwyg-editor="true"]')) return;
+    if (isRevealStackElement(element)) return;
+    if (isSlidePartElement(element)) return;
+    if (seen.has(element)) return;
+    seen.add(element);
+    slides.push(element);
+  }
+
+  for (const selector of deckSlideSelectorList()) {
+    root.querySelectorAll(selector).forEach(addSlide);
+  }
+
+  return slides
+    .filter((candidate) => {
+      const parentSlide = slides.find((other) => other !== candidate && other.contains(candidate));
+      if (!parentSlide) return true;
+      return parentSlide.matches(".reveal .slides > section");
+    })
+    .sort((a, b) => {
+      if (a === b) return 0;
+      return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+    });
+}
+
 export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow) {
   if (win.__cosmicFenceInstalled) return;
   win.__cosmicFenceInstalled = true;
@@ -193,8 +310,7 @@ export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow)
 
 export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) {
   const document = win.document;
-  const SLIDE_SELECTOR =
-    "section.slide, article.slide, section[data-title], section[data-section], [data-slide], [data-slide-id], .reveal .slides > section, .reveal .slides > section > section";
+  const SLIDE_SELECTOR = deckSlideSelector();
   let mode = "text";
   let idCounter = 1;
   let selectedElement: Element | null = null;
@@ -278,41 +394,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return "";
   }
 
-  function isRevealStack(element: Element) {
-    return (
-      element.matches(".reveal .slides > section") &&
-      Array.from(element.children).some((child) => child.tagName.toLowerCase() === "section")
-    );
-  }
-
-  function addSlide(slides: Element[], seen: Set<Element>, element: Element) {
-    if ((element as HTMLElement).dataset.wysiwygEditor === "true") return;
-    if (element.closest('[data-wysiwyg-editor="true"]')) return;
-    if (isRevealStack(element)) return;
-    if (seen.has(element)) return;
-    seen.add(element);
-    slides.push(element);
-  }
-
   function slideCandidates() {
-    const selectors = [
-      "section.slide",
-      "article.slide",
-      "section[data-title]",
-      "section[data-section]",
-      "[data-slide]",
-      "[data-slide-id]",
-      ".reveal .slides > section",
-      ".reveal .slides > section > section",
-    ];
-    const seen = new Set<Element>();
-    const slides: Element[] = [];
-    for (const selector of selectors) {
-      document.querySelectorAll(selector).forEach((element) => {
-        addSlide(slides, seen, element);
-      });
-    }
-    return slides;
+    return collectDeckSlides(document);
   }
 
   function textFrom(element: Element, selector: string) {
@@ -650,14 +733,15 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const rect = selectedElement.getBoundingClientRect();
     const isImage = selectedElement.tagName.toLowerCase() === "img";
     const canHaveBackground = selectedElement === document.body || selectedElement.matches(SLIDE_SELECTOR);
+    const textTarget = editableTextTarget(selectedElement);
     post("wysiwyg-selection", {
       selected: {
         id: ensureId(selectedElement),
         domId: selectedElement.id || "",
         tagName: selectedElement.tagName.toLowerCase(),
-        text: selectedElement.textContent || "",
+        text: textTarget?.textContent || "",
         childElementCount: selectedElement.childElementCount,
-        editableText: canDirectlyEditTextElement(selectedElement),
+        editableText: Boolean(textTarget),
         classes: Array.from(selectedElement.classList),
         ancestors: breadcrumb(selectedElement),
         isImage,
@@ -729,21 +813,22 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   function makeEditable(element: Element | null) {
     if (!element || element === document.documentElement || element === document.head) return false;
-    if (!canDirectlyEditTextElement(element)) return false;
-    if (!element.hasAttribute("data-wysiwyg-original-contenteditable")) {
-      const original = element.hasAttribute("contenteditable")
-        ? element.getAttribute("contenteditable") || ""
+    const target = editableTextTarget(element);
+    if (!target) return false;
+    if (!target.hasAttribute("data-wysiwyg-original-contenteditable")) {
+      const original = target.hasAttribute("contenteditable")
+        ? target.getAttribute("contenteditable") || ""
         : NONE;
-      element.setAttribute("data-wysiwyg-original-contenteditable", original);
+      target.setAttribute("data-wysiwyg-original-contenteditable", original);
     }
-    if (!element.hasAttribute("data-wysiwyg-original-spellcheck")) {
-      const original = element.hasAttribute("spellcheck") ? element.getAttribute("spellcheck") || "" : NONE;
-      element.setAttribute("data-wysiwyg-original-spellcheck", original);
+    if (!target.hasAttribute("data-wysiwyg-original-spellcheck")) {
+      const original = target.hasAttribute("spellcheck") ? target.getAttribute("spellcheck") || "" : NONE;
+      target.setAttribute("data-wysiwyg-original-spellcheck", original);
     }
-    element.setAttribute("contenteditable", "true");
-    element.setAttribute("spellcheck", "true");
-    element.setAttribute("data-wysiwyg-editing", "true");
-    (element as HTMLElement).focus({ preventScroll: true });
+    target.setAttribute("contenteditable", "true");
+    target.setAttribute("spellcheck", "true");
+    target.setAttribute("data-wysiwyg-editing", "true");
+    (target as HTMLElement).focus({ preventScroll: true });
     return true;
   }
 
@@ -786,6 +871,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (!element) return;
     ensureId(element);
     if (selectedElement && selectedElement !== element) {
+      restoreContentEditable(editableTextTarget(selectedElement));
       selectedElement.removeAttribute("data-wysiwyg-selected");
       restoreContentEditable(selectedElement);
     }
@@ -801,6 +887,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   function clearSelection() {
     if (!selectedElement) return;
+    restoreContentEditable(editableTextTarget(selectedElement));
     selectedElement.removeAttribute("data-wysiwyg-selected");
     restoreContentEditable(selectedElement);
     selectedElement = null;
@@ -833,7 +920,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   function setText(text: string) {
     if (!selectedElement) return;
-    selectedElement.textContent = text;
+    const target = editableTextTarget(selectedElement);
+    if (!target) return;
+    target.textContent = text;
     publishChange("text");
   }
 
@@ -1361,6 +1450,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const next = slides[index + 1] || slides[index - 1] || null;
     if (selectedElement && slide.contains(selectedElement)) {
       selectedElement.removeAttribute("data-wysiwyg-selected");
+      restoreContentEditable(editableTextTarget(selectedElement));
       restoreContentEditable(selectedElement);
       selectedElement = null;
     }
@@ -1784,6 +1874,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (!selectedElement) return;
     const active = document.activeElement;
     if (active instanceof win.HTMLElement) active.blur();
+    restoreContentEditable(editableTextTarget(selectedElement));
     restoreContentEditable(selectedElement);
     publishSelected();
   }
@@ -1809,8 +1900,10 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function selectionRangeInsideSelected(fallback: "contents" | "end") {
-    if (!selectedElement || !canDirectlyEditTextElement(selectedElement)) return null;
-    const root = selectedElement;
+    if (!selectedElement) return null;
+    const target = editableTextTarget(selectedElement);
+    if (!target) return null;
+    const root = target;
     const selection = win.getSelection();
     if (selection && selection.rangeCount > 0) {
       const current = selection.getRangeAt(0);
@@ -1945,13 +2038,14 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (!selectedElement || selectedElement === document.body) return false;
     const existingList = listForSelectedElement();
     if (existingList) return unwrapList(existingList);
-    if (!canDirectlyEditTextElement(selectedElement)) return false;
+    const target = editableTextTarget(selectedElement);
+    if (!target) return false;
     const list = document.createElement("ul");
     const item = document.createElement("li");
-    while (selectedElement.firstChild) item.append(selectedElement.firstChild);
+    while (target.firstChild) item.append(target.firstChild);
     if (!item.textContent && !item.querySelector("img, br")) item.append(document.createElement("br"));
     list.append(item);
-    selectedElement.replaceWith(list);
+    target.replaceWith(list);
     selectElement(item);
     return true;
   }
@@ -2117,8 +2211,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       event.preventDefault();
       event.stopPropagation();
       selectElement(target);
-      if (mode === "text" && !wasEditable && selectedElement === target && canDirectlyEditTextElement(target)) {
-        placeCaretAtPoint(event.clientX, event.clientY, target);
+      const textTarget = editableTextTarget(target);
+      if (mode === "text" && !wasEditable && selectedElement === target && textTarget) {
+        placeCaretAtPoint(event.clientX, event.clientY, textTarget);
       }
     },
     true,
@@ -2199,7 +2294,10 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       mode = typeof data.mode === "string" ? data.mode : "text";
       syncFenceState();
       document.documentElement.setAttribute("data-wysiwyg-mode", mode);
-      if (mode !== "text") restoreContentEditable(selectedElement);
+      if (mode !== "text") {
+        restoreContentEditable(editableTextTarget(selectedElement));
+        restoreContentEditable(selectedElement);
+      }
       if (mode === "text" && selectedElement) makeEditable(selectedElement);
       publishSelected();
     }
