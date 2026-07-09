@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cosmic Canvas Complex PPTX Sample Deck</title>
+  <style>
+    :root {
+      --ink: #18212f;
+      --muted: #637083;
+      --paper: #fbfaf6;
+      --line: rgba(24, 33, 47, 0.16);
+      --blue: #2f6fed;
+      --cyan: #14a6a6;
+      --coral: #ef6b57;
+      --gold: #dfa42f;
+      --plum: #6e4ac8;
+      --green: #6aa84f;
+      --fog: #edf3f8;
+      --navy: #111827;
+      font-family: Inter, Avenir, "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: #0d1320;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 36px;
+      display: grid;
+      gap: 36px;
+      background:
+        radial-gradient(circle at 16% 9%, rgba(47, 111, 237, 0.28), transparent 29%),
+        radial-gradient(circle at 91% 18%, rgba(239, 107, 87, 0.22), transparent 28%),
+        linear-gradient(180deg, #0d1320, #151d2e 54%, #0d1320);
+    }
+
+    .slide {
+      width: 1600px;
+      height: 900px;
+      position: relative;
+      overflow: hidden;
+      padding: 70px 84px;
+      background: var(--paper);
+      border-radius: 30px;
+      box-shadow: 0 34px 100px rgba(0, 0, 0, 0.36);
+      isolation: isolate;
+      break-after: page;
+    }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      background:
+        linear-gradient(135deg, rgba(47, 111, 237, 0.08), transparent 34%),
+        linear-gradient(315deg, rgba(20, 166, 166, 0.11), transparent 40%);
+    }
+
+    .slide::after {
+      content: attr(data-kicker);
+      position: absolute;
+      right: 54px;
+      bottom: 38px;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(24, 33, 47, 0.36);
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 88px; line-height: 0.96; letter-spacing: 0; }
+    h2 { font-size: 56px; line-height: 1.02; letter-spacing: 0; }
+    h3 { font-size: 27px; line-height: 1.15; }
+    p { color: var(--muted); font-size: 22px; line-height: 1.43; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 36px;
+      padding: 8px 15px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 850;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .grid { display: grid; gap: 22px; }
+    .two { grid-template-columns: 1fr 1fr; }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      position: relative;
+      min-width: 0;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 18px 46px rgba(24, 33, 47, 0.11);
+    }
+
+    .dark {
+      color: #f8fafc;
+      background:
+        radial-gradient(circle at 25% 28%, rgba(239, 107, 87, 0.34), transparent 28%),
+        radial-gradient(circle at 79% 24%, rgba(20, 166, 166, 0.34), transparent 34%),
+        linear-gradient(135deg, #111827, #21314b 58%, #101826);
+    }
+
+    .dark::before {
+      background:
+        linear-gradient(110deg, rgba(255, 255, 255, 0.13), transparent 32%),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.055) 0 1px, transparent 1px 94px);
+    }
+
+    .dark p, .dark .eyebrow { color: rgba(248, 250, 252, 0.78); }
+    .dark .eyebrow {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    .hero-orbit {
+      position: absolute;
+      right: -120px;
+      top: 92px;
+      width: 720px;
+      height: 720px;
+      border-radius: 180px;
+      transform: rotate(24deg);
+      background:
+        linear-gradient(135deg, rgba(47, 111, 237, 0.92), rgba(20, 166, 166, 0.76)),
+        linear-gradient(#fff, #fff);
+      box-shadow: 0 54px 120px rgba(47, 111, 237, 0.28);
+      filter: saturate(1.12);
+    }
+
+    .hero-orbit::after {
+      content: "";
+      position: absolute;
+      inset: 76px;
+      border-radius: 124px;
+      border: 3px solid rgba(255, 255, 255, 0.45);
+    }
+
+    .hero-title {
+      position: relative;
+      z-index: 2;
+      max-width: 880px;
+      display: grid;
+      gap: 26px;
+      margin-top: 52px;
+    }
+
+    .glass-stamp {
+      position: absolute;
+      right: 96px;
+      bottom: 88px;
+      width: 290px;
+      padding: 24px;
+      border-radius: 30px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      backdrop-filter: blur(14px);
+      color: #f8fafc;
+    }
+
+    .glass-stamp b { display: block; font-size: 40px; }
+    .glass-stamp span { display: block; margin-top: 6px; color: rgba(248, 250, 252, 0.75); font-size: 16px; }
+
+    .metric strong {
+      display: block;
+      color: var(--ink);
+      font-size: 48px;
+      line-height: 1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .accent-left::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 22px;
+      bottom: 22px;
+      width: 8px;
+      border-radius: 999px;
+      background: var(--accent, var(--blue));
+    }
+
+    .chip-row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: #eef3ff;
+      color: #2857b8;
+      border: 1px solid #cddcff;
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 30px;
+    }
+
+    .panel-title p { max-width: 600px; }
+
+    .sparkline { width: 100%; height: 170px; margin-top: 20px; }
+
+    .region-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 28px;
+      margin-top: 34px;
+    }
+
+    .map-field {
+      position: relative;
+      height: 590px;
+      border-radius: 32px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 24%, rgba(47, 111, 237, 0.26), transparent 26%),
+        radial-gradient(circle at 75% 60%, rgba(20, 166, 166, 0.26), transparent 28%),
+        #eaf2ff;
+      border: 1px solid #cbd9ef;
+    }
+
+    .route-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .node {
+      position: absolute;
+      min-width: 156px;
+      min-height: 84px;
+      padding: 14px 16px;
+      border: 1px solid rgba(24, 33, 47, 0.14);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.84);
+      box-shadow: 0 18px 44px rgba(24, 33, 47, 0.12);
+    }
+
+    .node b { display: block; font-size: 21px; }
+    .node small { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; }
+
+    .bar-chart {
+      height: 330px;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 14px;
+      align-items: end;
+      padding: 18px 14px 10px;
+      border-radius: 24px;
+      background: #f5f8fb;
+      border: 1px solid #dce5ee;
+    }
+
+    .bar {
+      display: grid;
+      align-content: end;
+      justify-items: center;
+      min-height: 40px;
+      border-radius: 16px 16px 8px 8px;
+      background: linear-gradient(180deg, var(--blue), var(--cyan));
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 850;
+      padding-bottom: 9px;
+      box-shadow: 0 14px 28px rgba(47, 111, 237, 0.2);
+    }
+
+    .matrix {
+      position: relative;
+      height: 560px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 18px;
+      margin-top: 24px;
+    }
+
+    .quadrant {
+      padding: 26px;
+      border-radius: 28px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .bubble {
+      position: absolute;
+      width: 144px;
+      height: 144px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #ffffff;
+      font-weight: 900;
+      text-align: center;
+      box-shadow: 0 18px 42px rgba(24, 33, 47, 0.18);
+    }
+
+    .heatmap {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(5, 1fr);
+      gap: 10px;
+      margin-top: 34px;
+    }
+
+    .heatmap div {
+      min-height: 70px;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      border-radius: 16px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .heatmap .label {
+      justify-items: start;
+      padding-left: 18px;
+      color: var(--muted);
+      background: transparent;
+      border-color: transparent;
+      text-align: left;
+    }
+
+    .risk-low { background: #dff5e8 !important; color: #1d6c45 !important; }
+    .risk-mid { background: #fff1c7 !important; color: #8b5a0d !important; }
+    .risk-high { background: #ffe0d8 !important; color: #9a341f !important; }
+    .risk-max { background: #ef6b57 !important; color: #ffffff !important; }
+
+    .timeline {
+      position: relative;
+      height: 560px;
+      margin-top: 28px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 74px;
+      right: 74px;
+      top: 278px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan), var(--gold), var(--coral));
+    }
+
+    .milestone {
+      position: absolute;
+      width: 246px;
+      padding: 20px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 16px 42px rgba(24, 33, 47, 0.12);
+    }
+
+    .milestone b { display: block; margin-bottom: 8px; font-size: 22px; }
+    .milestone small { color: var(--muted); font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+
+    .table-wrap {
+      margin-top: 34px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 18px 46px rgba(24, 33, 47, 0.1);
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 20px; }
+    th, td { padding: 20px 24px; border-bottom: 1px solid rgba(24, 33, 47, 0.1); text-align: left; }
+    th { background: #eaf1ff; color: #2857b8; font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; }
+    td { color: var(--ink); }
+    tr:last-child td { border-bottom: 0; }
+
+    .clipped {
+      clip-path: polygon(5% 8%, 92% 0, 100% 78%, 18% 100%, 0 45%);
+      background:
+        radial-gradient(circle at 72% 24%, rgba(255, 255, 255, 0.45), transparent 26%),
+        linear-gradient(135deg, var(--plum), var(--blue));
+      color: #ffffff;
+      min-height: 270px;
+      padding: 58px 54px;
+      filter: drop-shadow(0 28px 34px rgba(47, 111, 237, 0.28));
+    }
+
+    .rotated-card {
+      transform: rotate(-4deg);
+      background: #172033;
+      color: #ffffff;
+    }
+
+    .blur-card {
+      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.34);
+      border-color: rgba(255, 255, 255, 0.42);
+    }
+
+    .svg-panel {
+      display: grid;
+      place-items: center;
+      min-height: 520px;
+    }
+
+    .quote {
+      position: absolute;
+      left: 84px;
+      bottom: 86px;
+      max-width: 700px;
+      font-size: 34px;
+      line-height: 1.18;
+      color: rgba(248, 250, 252, 0.9);
+    }
+
+    @media print {
+      body { padding: 0; gap: 0; background: white; }
+      .slide { border-radius: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <section class="slide dark" data-title="AstraForge Operating Review" data-kicker="01 / title">
+    <div class="hero-orbit"></div>
+    <div class="hero-title">
+      <span class="eyebrow">AstraForge Labs / Fictional 2027</span>
+      <h1>A complex sample deck for PowerPoint export testing</h1>
+      <p>This self-contained HTML presentation mixes editable text, metric cards, SVG charts, tables, gradients, filters, transforms, clipped regions, pseudo-elements, and overlapping layers.</p>
+      <div class="chip-row">
+        <span class="chip">Hybrid mode</span>
+        <span class="chip">Exact image mode</span>
+        <span class="chip">Editable table test</span>
+      </div>
+    </div>
+    <div class="glass-stamp"><b>12 slides</b><span>No external assets. Designed to stress conversion.</span></div>
+  </section>
+
+  <section class="slide" data-title="Executive Instrument Panel" data-kicker="02 / dashboard">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Executive dashboard</span>
+        <h2 style="margin-top: 22px;">The core system is scaling, but edge volatility is rising.</h2>
+      </div>
+      <p>Metric cards should stay separately editable in PowerPoint. SVG and complex background regions can be rasterized and reported.</p>
+    </div>
+    <div class="grid four">
+      <div class="card metric accent-left" style="--accent: var(--blue);"><strong>97.8%</strong><span>fleet availability</span></div>
+      <div class="card metric accent-left" style="--accent: var(--cyan);"><strong>42 ms</strong><span>median dispatch time</span></div>
+      <div class="card metric accent-left" style="--accent: var(--gold);"><strong>6.3x</strong><span>simulation throughput</span></div>
+      <div class="card metric accent-left" style="--accent: var(--coral);"><strong>-18%</strong><span>manual escalations</span></div>
+    </div>
+    <div class="grid two" style="margin-top: 24px;">
+      <div class="card">
+        <h3>Reliability trend</h3>
+        <svg class="sparkline" viewBox="0 0 680 170" role="img" aria-label="Reliability trend chart">
+          <defs>
+            <linearGradient id="spark-fill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#2f6fed" stop-opacity="0.32" />
+              <stop offset="100%" stop-color="#2f6fed" stop-opacity="0" />
+            </linearGradient>
+          </defs>
+          <path d="M12 142 C 86 132, 118 102, 178 108 S 280 144, 344 96 S 452 52, 530 66 S 612 38, 668 26 L 668 168 L 12 168 Z" fill="url(#spark-fill)" />
+          <path d="M12 142 C 86 132, 118 102, 178 108 S 280 144, 344 96 S 452 52, 530 66 S 612 38, 668 26" fill="none" stroke="#2f6fed" stroke-width="10" stroke-linecap="round" />
+          <circle cx="668" cy="26" r="14" fill="#14a6a6" />
+        </svg>
+      </div>
+      <div class="card">
+        <h3>Priority themes</h3>
+        <p style="margin-top: 14px;">The readable paragraph and the chips below should remain useful in editable and hybrid PowerPoint exports.</p>
+        <div class="chip-row" style="margin-top: 24px;">
+          <span class="chip">Forecast envelope</span>
+          <span class="chip">Risk containment</span>
+          <span class="chip">Partner readiness</span>
+          <span class="chip">Dispatch quality</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Regional Network Map" data-kicker="03 / network">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Regional network</span>
+        <h2 style="margin-top: 22px;">Routed flows combine SVG paths with editable node labels.</h2>
+      </div>
+      <p>The map background and routes test raster fallback, while labels and callouts should remain editable where possible.</p>
+    </div>
+    <div class="region-grid">
+      <div class="map-field">
+        <svg class="route-svg" viewBox="0 0 930 590" role="img" aria-label="Network routes">
+          <path d="M110 170 C 260 60, 400 104, 496 190 S 690 360, 842 190" fill="none" stroke="#2f6fed" stroke-width="12" stroke-linecap="round" opacity="0.72" />
+          <path d="M138 430 C 282 350, 388 450, 548 340 S 712 164, 868 414" fill="none" stroke="#14a6a6" stroke-width="10" stroke-dasharray="24 18" stroke-linecap="round" opacity="0.76" />
+          <path d="M310 102 L 724 510" fill="none" stroke="#ef6b57" stroke-width="9" stroke-linecap="round" opacity="0.56" />
+        </svg>
+        <div class="node" style="left: 92px; top: 132px;"><b>North</b><small>Storage</small></div>
+        <div class="node" style="left: 332px; top: 78px;"><b>Core</b><small>Dispatch</small></div>
+        <div class="node" style="left: 512px; top: 270px;"><b>Hub</b><small>Flex</small></div>
+        <div class="node" style="left: 720px; top: 148px;"><b>East</b><small>Grid</small></div>
+        <div class="node" style="left: 742px; top: 424px;"><b>South</b><small>Demand</small></div>
+      </div>
+      <div class="grid" style="gap: 18px;">
+        <div class="card metric"><strong>1.8 GW</strong><span>controllable load in simulation</span></div>
+        <div class="card metric"><strong>24</strong><span>partner routes monitored</span></div>
+        <div class="card metric"><strong>11</strong><span>escalation paths removed</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Demand Forecast Envelope" data-kicker="04 / forecast">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Forecast model</span>
+        <h2 style="margin-top: 22px;">Variable-height bars and paragraph copy test layout measurement.</h2>
+      </div>
+      <p>Bars, labels, and copy should preserve readable placement even when converted from CSS grid to PowerPoint coordinates.</p>
+    </div>
+    <div class="grid two" style="margin-top: 30px;">
+      <div class="card">
+        <h3>Eight-month demand envelope</h3>
+        <div class="bar-chart">
+          <div class="bar" style="height: 42%;">Jan</div>
+          <div class="bar" style="height: 56%;">Feb</div>
+          <div class="bar" style="height: 61%;">Mar</div>
+          <div class="bar" style="height: 77%;">Apr</div>
+          <div class="bar" style="height: 69%;">May</div>
+          <div class="bar" style="height: 86%;">Jun</div>
+          <div class="bar" style="height: 79%;">Jul</div>
+          <div class="bar" style="height: 92%;">Aug</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Interpretation</h3>
+        <p style="margin-top: 18px;">The system can absorb a sharper load ramp if operators keep flexible contracts open for the final three weeks of the cycle.</p>
+        <div class="grid two" style="margin-top: 24px;">
+          <div class="card metric"><strong>+22%</strong><span>peak load variance</span></div>
+          <div class="card metric"><strong>3</strong><span>critical path actions</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Product Readiness Matrix" data-kicker="05 / matrix">
+    <span class="eyebrow">Competitive field</span>
+    <h2 style="margin-top: 22px;">A 2x2 matrix with editable quadrants and floating bubbles.</h2>
+    <div class="matrix">
+      <div class="quadrant"><h3>High adoption<br>Low complexity</h3><p style="margin-top: 14px;">Self-serve reports and automated routing.</p></div>
+      <div class="quadrant"><h3>High adoption<br>High complexity</h3><p style="margin-top: 14px;">Scenario planning with reliability constraints.</p></div>
+      <div class="quadrant"><h3>Low adoption<br>Low complexity</h3><p style="margin-top: 14px;">Legacy exports and manual review packets.</p></div>
+      <div class="quadrant"><h3>Low adoption<br>High complexity</h3><p style="margin-top: 14px;">Bespoke integrations and custom dispatch maps.</p></div>
+      <div class="bubble" style="left: 330px; top: 170px; background: #2f6fed;">Core<br>deck</div>
+      <div class="bubble" style="left: 920px; top: 118px; background: #14a6a6;">AI<br>planner</div>
+      <div class="bubble" style="left: 1074px; top: 382px; background: #ef6b57;">Custom<br>flow</div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Risk Heatmap" data-kicker="06 / heatmap">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Risk surface</span>
+        <h2 style="margin-top: 22px;">Heatmap cells should export as separate editable rectangles.</h2>
+      </div>
+      <p>The grid intentionally has many simple colored cells to test shape count, z-order, and editable fills.</p>
+    </div>
+    <div class="heatmap">
+      <div class="label"></div><div>Access</div><div>Model</div><div>Ops</div><div>Legal</div><div>Partner</div>
+      <div class="label">Week 1</div><div class="risk-low">Low</div><div class="risk-mid">Med</div><div class="risk-low">Low</div><div class="risk-mid">Med</div><div class="risk-low">Low</div>
+      <div class="label">Week 2</div><div class="risk-mid">Med</div><div class="risk-high">High</div><div class="risk-mid">Med</div><div class="risk-low">Low</div><div class="risk-mid">Med</div>
+      <div class="label">Week 3</div><div class="risk-high">High</div><div class="risk-max">Max</div><div class="risk-mid">Med</div><div class="risk-high">High</div><div class="risk-mid">Med</div>
+      <div class="label">Week 4</div><div class="risk-low">Low</div><div class="risk-mid">Med</div><div class="risk-low">Low</div><div class="risk-mid">Med</div><div class="risk-low">Low</div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Incident Replay Timeline" data-kicker="07 / timeline">
+    <span class="eyebrow">Replay timeline</span>
+    <h2 style="margin-top: 22px;">Milestone cards test absolute positioning and connector layers.</h2>
+    <div class="timeline">
+      <div class="milestone" style="left: 80px; top: 92px;"><small>08:10</small><b>Load spike</b><p>Automated routing detected a north-region surge.</p></div>
+      <div class="milestone" style="left: 376px; top: 334px;"><small>08:22</small><b>Flex release</b><p>Storage partner committed a short-duration relief window.</p></div>
+      <div class="milestone" style="left: 674px; top: 92px;"><small>08:41</small><b>Dispatch tune</b><p>Latency rules were tightened for the next cycle.</p></div>
+      <div class="milestone" style="left: 970px; top: 334px;"><small>09:15</small><b>Closeout</b><p>Post-incident packet moved into review.</p></div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="SVG Chart Panel" data-kicker="08 / svg">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Inline SVG</span>
+        <h2 style="margin-top: 22px;">This slide has an inline SVG chart with labels and curves.</h2>
+      </div>
+      <p>The first exporter should keep the chart visible and report whether it was rasterized.</p>
+    </div>
+    <div class="card svg-panel">
+      <svg width="1060" height="500" viewBox="0 0 1060 500" role="img" aria-label="Layered SVG chart">
+        <defs>
+          <linearGradient id="area-blue" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#2f6fed" stop-opacity="0.42" />
+            <stop offset="100%" stop-color="#2f6fed" stop-opacity="0.02" />
+          </linearGradient>
+          <linearGradient id="area-cyan" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#14a6a6" stop-opacity="0.36" />
+            <stop offset="100%" stop-color="#14a6a6" stop-opacity="0.02" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="1060" height="500" rx="34" fill="#f4f8fc" />
+        <g stroke="#d8e2ec" stroke-width="2">
+          <path d="M90 80 H990" /><path d="M90 180 H990" /><path d="M90 280 H990" /><path d="M90 380 H990" />
+        </g>
+        <path d="M92 390 C 210 330, 250 260, 360 270 S 530 365, 650 222 S 820 148, 982 118 L 982 430 L 92 430 Z" fill="url(#area-blue)" />
+        <path d="M92 390 C 210 330, 250 260, 360 270 S 530 365, 650 222 S 820 148, 982 118" fill="none" stroke="#2f6fed" stroke-width="10" stroke-linecap="round" />
+        <path d="M92 420 C 220 378, 310 312, 432 330 S 594 270, 704 196 S 850 204, 982 158 L 982 430 L 92 430 Z" fill="url(#area-cyan)" />
+        <path d="M92 420 C 220 378, 310 312, 432 330 S 594 270, 704 196 S 850 204, 982 158" fill="none" stroke="#14a6a6" stroke-width="8" stroke-linecap="round" />
+        <g fill="#18212f" font-family="Inter, Arial" font-weight="800" font-size="22">
+          <text x="92" y="462">Jan</text><text x="304" y="462">Mar</text><text x="516" y="462">May</text><text x="728" y="462">Jul</text><text x="940" y="462">Sep</text>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Structured Export Scorecard" data-kicker="09 / table">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Editable table</span>
+        <h2 style="margin-top: 22px;">The scorecard table should open as a native PowerPoint table.</h2>
+      </div>
+      <p>Use this slide to test whether cell text, rows, and columns remain editable after export.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Export feature</th><th>Expected PPTX behavior</th><th>Risk</th><th>Review note</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Headline text</td><td>Editable text box</td><td>Low</td><td>Copy edit directly in PowerPoint.</td></tr>
+          <tr><td>Metric cards</td><td>Editable shapes and labels</td><td>Low</td><td>Recolor or move individual cards.</td></tr>
+          <tr><td>SVG chart</td><td>Visible raster or SVG fallback</td><td>Medium</td><td>Report should disclose conversion mode.</td></tr>
+          <tr><td>Complex filters</td><td>Raster fallback in hybrid mode</td><td>High</td><td>Fidelity over object editability.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Complex CSS Stress Trap" data-kicker="10 / stress">
+    <div class="panel-title">
+      <div>
+        <span class="eyebrow">Stress trap</span>
+        <h2 style="margin-top: 22px;">Browser-only styling should be reported, not silently dropped.</h2>
+      </div>
+      <p>Clip paths, transforms, blur filters, and backdrop blur are intentionally present.</p>
+    </div>
+    <div class="grid three" style="margin-top: 30px; align-items: stretch;">
+      <div class="clipped"><h3>Clipped region</h3><p style="margin-top: 16px; color: rgba(255,255,255,0.78);">Hybrid mode should rasterize this region if editable geometry is not safe.</p></div>
+      <div class="card rotated-card"><h3>Rotated card</h3><p style="margin-top: 16px; color: rgba(255,255,255,0.78);">Complex transforms are visible in the browser but awkward in PPTX.</p></div>
+      <div class="card blur-card"><h3>Backdrop blur</h3><p style="margin-top: 16px;">This panel tests unsupported blur and translucent layering.</p></div>
+    </div>
+  </section>
+
+  <section class="slide" data-title="Launch Workstreams" data-kicker="11 / workstreams">
+    <span class="eyebrow">Operating cadence</span>
+    <h2 style="margin-top: 22px;">A dense workstream view with repeated cards and labels.</h2>
+    <div class="grid three" style="margin-top: 34px;">
+      <div class="card"><h3>Data readiness</h3><p style="margin-top: 14px;">Schema freeze, sample packets, and validation guardrails.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Maya</span><span class="chip">Green</span></div></div>
+      <div class="card"><h3>Partner path</h3><p style="margin-top: 14px;">Escalation copy, contract windows, and support handoffs.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Noor</span><span class="chip">Yellow</span></div></div>
+      <div class="card"><h3>Executive review</h3><p style="margin-top: 14px;">Narrative, risk appendix, and finance bridge.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Luis</span><span class="chip">Green</span></div></div>
+      <div class="card"><h3>Model quality</h3><p style="margin-top: 14px;">Backtests, feature drift review, and alert calibration.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Chen</span><span class="chip">Red</span></div></div>
+      <div class="card"><h3>Design system</h3><p style="margin-top: 14px;">Slide templates, color tokens, and chart guidelines.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Imani</span><span class="chip">Green</span></div></div>
+      <div class="card"><h3>Export QA</h3><p style="margin-top: 14px;">PowerPoint review, render checks, and report warnings.</p><div class="chip-row" style="margin-top: 24px;"><span class="chip">Owner: Team</span><span class="chip">Yellow</span></div></div>
+    </div>
+  </section>
+
+  <section class="slide dark" data-title="Decision" data-kicker="12 / close">
+    <div class="hero-orbit" style="right: -210px; top: 150px; transform: rotate(-18deg);"></div>
+    <span class="eyebrow">Decision</span>
+    <h1 style="position: relative; z-index: 2; max-width: 920px; margin-top: 74px;">Keep the HTML workflow, export the right PowerPoint for the moment.</h1>
+    <p class="quote">Use Editable when downstream edits matter, Exact image when visual parity matters, and Hybrid when you need a practical compromise.</p>
+  </section>
+</body>
+</html>
