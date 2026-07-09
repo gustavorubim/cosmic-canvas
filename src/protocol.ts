@@ -100,6 +100,7 @@ export type BridgeMessage =
 /** Commands sent from the app shell down to the iframe bridge. */
 export type BridgeCommand =
   | { command: "set-mode"; mode: EditorMode }
+  | { command: "set-force-timeline"; enabled: boolean }
   | { command: "select"; id: string }
   | { command: "select-parent" }
   | { command: "apply-style"; styles: Record<string, string> }

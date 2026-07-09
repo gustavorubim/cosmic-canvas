@@ -260,6 +260,23 @@ describe("bridge helpers", () => {
 
     expect(collectDeckSlides(win.document)).toEqual([]);
   });
+
+  it("force mode infers ambiguous repeated content panels", () => {
+    const { win } = createWindow(`
+      <main>
+        <div class="report-block"><h1>Opening Position</h1><p>Liquidity controls and beginning balances for the operating review.</p></div>
+        <div class="report-block"><h1>Regulatory Lineage</h1><p>Rule mapping, data freshness, and exception history for the daily packet.</p></div>
+        <div class="report-block"><h1>Closeout Actions</h1><p>Owners, checkpoints, and next-cycle evidence requirements for the team.</p></div>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.querySelector("h1")?.textContent)).toEqual([
+      "Opening Position",
+      "Regulatory Lineage",
+      "Closeout Actions",
+    ]);
+  });
 });
 
 describe("editor bridge extraction", () => {
@@ -722,6 +739,28 @@ describe("deck detection", () => {
     expect(thumbnail).not.toContain("<script");
     expect(thumbnail).not.toContain("onclick");
     expect(thumbnail).not.toContain("data-wysiwyg-id");
+  });
+
+  it("republishes an inferred deck when force timeline is enabled", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><body><main>
+        <div class="report-block"><h1>Opening Position</h1><p>Liquidity controls and beginning balances for the operating review.</p></div>
+        <div class="report-block"><h1>Regulatory Lineage</h1><p>Rule mapping, data freshness, and exception history for the daily packet.</p></div>
+        <div class="report-block"><h1>Closeout Actions</h1><p>Owners, checkpoints, and next-cycle evidence requirements for the team.</p></div>
+      </main></body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    expect(latestDeckMessage(messages).slides).toEqual([]);
+
+    postCommand(win, { command: "set-force-timeline", enabled: true });
+
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Opening Position",
+      "Regulatory Lineage",
+      "Closeout Actions",
+    ]);
   });
 });
 

@@ -328,7 +328,76 @@ export function inferStructuralDeckSlides(root: ParentNode) {
   return best?.slides || [];
 }
 
-export function collectDeckSlides(root: ParentNode) {
+export function meaningfulForcedSlideElement(element: Element) {
+  if ((element as HTMLElement).dataset?.wysiwygEditor === "true") return false;
+  if (element.closest('[data-wysiwyg-editor="true"]')) return false;
+  if (isRevealStackElement(element) || isSlidePartElement(element) || hasNonSlideChromeHint(element)) return false;
+  if (["script", "style", "template", "link", "meta", "nav", "footer", "header", "aside"].includes(element.tagName.toLowerCase())) {
+    return false;
+  }
+  const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+  return text.length >= 12 || Boolean(element.querySelector("img, svg, canvas, table, video"));
+}
+
+export function forcedSlideScore(element: Element, parent: Element | null) {
+  if (!meaningfulForcedSlideElement(element)) return -Infinity;
+  const baseScore = structuralSlideScore(element, parent);
+  let score = Number.isFinite(baseScore) ? Math.max(0, baseScore) : 0;
+  if (hasDeckContainerHint(parent)) score += 2;
+  if (hasSlideItemHint(element)) score += 2;
+  if (element.querySelector("h1, h2, h3, [role='heading']")) score += 2;
+  if (element.children.length > 0) score += 1;
+  if ((element.textContent || "").replace(/\s+/g, " ").trim().length >= 60) score += 1;
+  return score;
+}
+
+export function inferForcedDeckSlides(root: ParentNode) {
+  const rootNode = root as Node;
+  const ownerDocument = rootNode.nodeType === 9 ? (rootNode as Document) : rootNode.ownerDocument;
+  const searchRoot = rootNode.nodeType === 9 ? ownerDocument?.body || ownerDocument?.documentElement : root;
+  if (!searchRoot) return [];
+
+  const containers = [
+    searchRoot,
+    ...Array.from(searchRoot.querySelectorAll("main, [role='main'], body *")).filter((element) => {
+      return element.children.length >= 2 && element.children.length <= 120;
+    }),
+  ];
+  let best: { slides: Element[]; score: number } | null = null;
+
+  for (const container of containers) {
+    if ((container as Node).nodeType !== 1) continue;
+    const containerElement = container as Element;
+    if (hasNonSlideChromeHint(containerElement)) continue;
+    const children = Array.from(containerElement.children).filter(meaningfulForcedSlideElement);
+    if (children.length < 2 || children.length > 120) continue;
+
+    const scored = children
+      .map((child) => ({ child, score: forcedSlideScore(child, containerElement) }))
+      .filter((item) => item.score >= 3);
+    if (scored.length < 2) continue;
+
+    const candidates = scored.map((item) => item.child);
+    const repeated = hasRepeatedSiblingShape(candidates);
+    const parentHint = hasDeckContainerHint(containerElement);
+    const itemHints = candidates.filter((candidate) => hasSlideItemHint(candidate)).length;
+    if (!parentHint && !repeated && itemHints < 2 && scored.length < 3) continue;
+
+    const average = scored.reduce((total, item) => total + item.score, 0) / scored.length;
+    const groupScore = candidates.length * 10 + average + (parentHint ? 8 : 0) + (repeated ? 6 : 0) + itemHints;
+    if (!best || groupScore > best.score) {
+      best = { slides: candidates, score: groupScore };
+    }
+  }
+
+  if (best?.slides.length) return best.slides;
+
+  const body = ownerDocument?.body;
+  if (body && meaningfulForcedSlideElement(body)) return [body];
+  return [];
+}
+
+export function collectDeckSlides(root: ParentNode, options: { force?: boolean } = {}) {
   const seen = new Set<Element>();
   const slides: Element[] = [];
 
@@ -348,6 +417,12 @@ export function collectDeckSlides(root: ParentNode) {
 
   if (!slides.length) {
     inferStructuralDeckSlides(root).forEach(addSlide);
+  }
+
+  if (options.force && slides.length <= 1) {
+    slides.length = 0;
+    seen.clear();
+    inferForcedDeckSlides(root).forEach(addSlide);
   }
 
   return slides
@@ -461,6 +536,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   let inputTimer = 0;
   let deckTimer = 0;
   let activeSlideId = "";
+  let forceTimeline = false;
   let dragState: {
     element: HTMLElement;
     startX: number;
@@ -538,7 +614,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function slideCandidates() {
-    return collectDeckSlides(document);
+    return collectDeckSlides(document, { force: forceTimeline });
   }
 
   function textFrom(element: Element, selector: string) {
@@ -2443,6 +2519,11 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       }
       if (mode === "text" && selectedElement) makeEditable(selectedElement);
       publishSelected();
+    }
+
+    if (data.command === "set-force-timeline") {
+      forceTimeline = Boolean(data.enabled);
+      publishDeck();
     }
 
     if (data.command === "select" && data.id) {

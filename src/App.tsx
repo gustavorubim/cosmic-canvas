@@ -155,6 +155,7 @@ export default function App() {
   const [mode, setMode] = useState<EditorMode>("text");
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [runTrustedScripts, setRunTrustedScripts] = useState(false);
+  const [forceTimeline, setForceTimeline] = useState(false);
   const [sourceVisible, setSourceVisible] = useState(true);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
   const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
@@ -476,6 +477,11 @@ export default function App() {
     renderHtml(sourceHtml, enabled);
   }
 
+  function toggleForceTimeline(enabled: boolean) {
+    setForceTimeline(enabled);
+    postCommand("set-force-timeline", { enabled });
+  }
+
   async function openFile() {
     if (vscodeApi) {
       vscodeApi.postMessage({ type: "openFile" });
@@ -682,6 +688,7 @@ export default function App() {
       if (data.type === "wysiwyg-ready") {
         setPreviewStatus({ state: "ready", title: data.title, bodyTextStart: data.bodyTextStart });
         postCommand("set-mode", { mode });
+        postCommand("set-force-timeline", { enabled: forceTimeline });
         if (pendingScrollRef.current) {
           postCommand("scroll-to", pendingScrollRef.current);
           pendingScrollRef.current = null;
@@ -742,7 +749,7 @@ export default function App() {
       window.removeEventListener("message", onMessage);
       if (pendingHistoryTimer.current) window.clearTimeout(pendingHistoryTimer.current);
     };
-  }, [mode]);
+  }, [mode, forceTimeline]);
 
   useEffect(() => {
     if (!vscodeApi) return;
@@ -902,6 +909,8 @@ export default function App() {
         onToggleData={() => setSidePanel((current) => (current === "data" ? "inspect" : "data"))}
         runTrustedScripts={runTrustedScripts}
         onToggleTrusted={toggleTrustedScripts}
+        forceTimeline={forceTimeline}
+        onToggleForceTimeline={toggleForceTimeline}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={() => stepHistory(-1)}

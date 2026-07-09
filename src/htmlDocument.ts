@@ -11,11 +11,14 @@ import {
   hasRepeatedSiblingShape,
   hasSlideItemHint,
   hasTokenMatch,
+  forcedSlideScore,
+  inferForcedDeckSlides,
   inferStructuralDeckSlides,
   installEditorBridge,
   installKeyboardFence,
   isRevealStackElement,
   isSlidePartElement,
+  meaningfulForcedSlideElement,
   structuralSlideScore,
   styleLooksPaged,
 } from "./bridge/editorBridge";
@@ -496,6 +499,9 @@ function bridgeHelperSource() {
     classSignature.toString(),
     hasRepeatedSiblingShape.toString(),
     inferStructuralDeckSlides.toString(),
+    meaningfulForcedSlideElement.toString(),
+    forcedSlideScore.toString(),
+    inferForcedDeckSlides.toString(),
     collectDeckSlides.toString(),
   ].join("\n");
 }

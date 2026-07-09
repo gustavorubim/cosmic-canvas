@@ -4,6 +4,7 @@ import {
   Monitor,
   MousePointer2,
   Move,
+  PanelBottom,
   PanelLeftClose,
   PanelLeftOpen,
   Redo2,
@@ -43,6 +44,8 @@ type ToolbarProps = {
   onToggleData: () => void;
   runTrustedScripts: boolean;
   onToggleTrusted: (enabled: boolean) => void;
+  forceTimeline: boolean;
+  onToggleForceTimeline: (enabled: boolean) => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -60,6 +63,8 @@ export function Toolbar({
   onToggleData,
   runTrustedScripts,
   onToggleTrusted,
+  forceTimeline,
+  onToggleForceTimeline,
   canUndo,
   canRedo,
   onUndo,
@@ -124,6 +129,19 @@ export function Toolbar({
         />
         <Film size={16} aria-hidden="true" />
         Trusted scripts
+      </label>
+
+      <label
+        className={`script-toggle ${forceTimeline ? "is-on" : ""}`}
+        title="Force the bottom timeline to infer slides from repeated page-like content."
+      >
+        <input
+          checked={forceTimeline}
+          onChange={(event) => onToggleForceTimeline(event.target.checked)}
+          type="checkbox"
+        />
+        <PanelBottom size={16} aria-hidden="true" />
+        Force timeline
       </label>
 
       <div className="icon-group" aria-label="History">
