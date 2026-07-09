@@ -63,10 +63,7 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
     const webview = webviewPanel.webview;
     webview.options = {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, "dist"),
-        vscode.Uri.joinPath(this.context.extensionUri, "public"),
-      ],
+      localResourceRoots: [],
     };
     webview.html = this.webviewHtml(webview);
 
@@ -135,22 +132,19 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
   private webviewHtml(webview: vscode.Webview): string {
     const assetsPath = path.join(this.context.extensionPath, "dist", "assets");
     const assets = fs.readdirSync(assetsPath);
-    const scriptFile = assets.find((file) => file.endsWith(".js"));
-    const styleFile = assets.find((file) => file.endsWith(".css"));
+    const scriptFile = assets.find((file) => /^index-.*\.js$/.test(file));
+    const styleFile = assets.find((file) => /^index-.*\.css$/.test(file));
 
     if (!scriptFile || !styleFile) {
       throw new Error("Run npm run build before opening Cosmic Canvas in VS Code.");
     }
 
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, "dist", "assets", scriptFile),
-    );
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, "dist", "assets", styleFile),
-    );
-    const baseUri = `${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist"))}/`;
-    // The iframe uses srcdoc, so it inherits this webview CSP. Keep the app bundle
-    // local, but allow common CDN assets that trusted HTML decks often depend on.
+    const scriptSource = inlineScriptSource(fs.readFileSync(path.join(assetsPath, scriptFile), "utf8"));
+    const styleSource = inlineStyleSource(fs.readFileSync(path.join(assetsPath, styleFile), "utf8"));
+
+    // Inline the app bundle instead of loading it through asWebviewUri. Some VS
+    // Code builds can fail before rendering when their webview resource service
+    // worker cannot register, so keep the extension shell self-contained.
     const trustedAssetSources = [
       "https://cdn.jsdelivr.net",
       "https://unpkg.com",
@@ -173,16 +167,23 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base href="${baseUri}" />
-    <link rel="stylesheet" href="${styleUri}" />
+    <style>${styleSource}</style>
     <title>Cosmic Canvas</title>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="${scriptUri}"></script>
+    <script type="module">${scriptSource}</script>
   </body>
 </html>`;
   }
+}
+
+function inlineStyleSource(source: string): string {
+  return source.replace(/<\/style/gi, "<\\/style");
+}
+
+function inlineScriptSource(source: string): string {
+  return source.replace(/<\/script/gi, "<\\/script");
 }
 
 async function replaceDocumentText(document: vscode.TextDocument, nextText: string): Promise<boolean> {
