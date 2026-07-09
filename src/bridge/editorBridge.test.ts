@@ -295,6 +295,71 @@ describe("bridge helpers", () => {
     ]);
   });
 
+  it("force mode accepts two strong visual pages with different shapes", () => {
+    const { win } = createWindow(`
+      <main>
+        <div id="cover-visual" aria-label="Cover" class="cover-art" style="width: 1280px; height: 720px; background-image: url(cover.png);"></div>
+        <figure id="summary-visual" aria-label="Summary" class="summary-artboard" style="width: 1280px; height: 720px; border: 1px solid #94a3b8;"></figure>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.id)).toEqual([
+      "cover-visual",
+      "summary-visual",
+    ]);
+  });
+
+  it("force mode finds slide pages nested under separate wrappers", () => {
+    const { win } = createWindow(`
+      <main>
+        <section class="export-page-wrapper">
+          <div id="nested-page-a" aria-label="Nested opening" class="page-surface-a" style="width: 1280px; height: 720px; background: #f8fafc;"></div>
+        </section>
+        <section class="export-page-wrapper">
+          <div id="nested-page-b" aria-label="Nested risk" class="page-surface-b" style="width: 1280px; height: 720px; background: #e0f2fe;"></div>
+        </section>
+        <section class="export-page-wrapper">
+          <div id="nested-page-c" aria-label="Nested close" class="page-surface-c" style="width: 1280px; height: 720px; background: #fef3c7;"></div>
+        </section>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.id)).toEqual([
+      "nested-page-a",
+      "nested-page-b",
+      "nested-page-c",
+    ]);
+  });
+
+  it("force mode replaces same-count wrapper slides with nested page surfaces", () => {
+    const { win } = createWindow(`
+      <div class="slides">
+        <section class="export-page-wrapper" data-page="1">
+          <div id="nested-slide-a" aria-label="Wrapped opening" class="page-surface-a" style="width: 1280px; height: 720px; background: #f8fafc;"></div>
+        </section>
+        <section class="export-page-wrapper" data-page="2">
+          <div id="nested-slide-b" aria-label="Wrapped risk" class="page-surface-b" style="width: 1280px; height: 720px; background: #e0f2fe;"></div>
+        </section>
+        <section class="export-page-wrapper" data-page="3">
+          <div id="nested-slide-c" aria-label="Wrapped close" class="page-surface-c" style="width: 1280px; height: 720px; background: #fef3c7;"></div>
+        </section>
+      </div>
+    `);
+
+    expect(collectDeckSlides(win.document).map((slide) => slide.className)).toEqual([
+      "export-page-wrapper",
+      "export-page-wrapper",
+      "export-page-wrapper",
+    ]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.id)).toEqual([
+      "nested-slide-a",
+      "nested-slide-b",
+      "nested-slide-c",
+    ]);
+  });
+
   it("force mode infers page-like frames with styled title spans", () => {
     const { win } = createWindow(`
       <section class="storyboard">

@@ -409,6 +409,86 @@ export function forcedSlideScore(element: Element, parent: Element | null) {
   return score;
 }
 
+export function forcedSlideStrongSignal(element: Element) {
+  return (
+    hasSlideItemHint(element) ||
+    styleLooksPaged(element) ||
+    computedStyleLooksPaged(element) ||
+    forcedVisualSignal(element) ||
+    forcedTitleSignal(element)
+  );
+}
+
+export function forcedSlideCandidate(element: Element, parent: Element | null) {
+  const tag = element.tagName.toLowerCase();
+  if (["html", "body", "main"].includes(tag)) return false;
+  return forcedSlideStrongSignal(element) && forcedSlideScore(element, parent) >= 5;
+}
+
+export function hasForcedWrapperHint(element: Element) {
+  return hasTokenMatch(
+    element,
+    /(^|[\s_-])(wrapper|container|viewport|scaler|scale|outer|inner|mount|root|stage|holder|layer)([\s_-]|$)/,
+  );
+}
+
+export function forcedSlideContentElement(element: Element) {
+  if (!hasForcedWrapperHint(element)) return element;
+  if (styleLooksPaged(element) || forcedVisualSignal(element)) return element;
+  const directCandidates = Array.from(element.children).filter((child) => forcedSlideCandidate(child, element));
+  return directCandidates.length === 1 ? directCandidates[0] : element;
+}
+
+export function pruneForcedSlideCandidates(candidates: Element[]) {
+  return candidates.filter((candidate) => {
+    const candidateScore = forcedSlideScore(candidate, candidate.parentElement);
+    const directContent = forcedSlideContentElement(candidate);
+    if (directContent !== candidate && candidates.includes(directContent)) return false;
+
+    const containingCandidates = candidates.filter((other) => other !== candidate && other.contains(candidate));
+    if (
+      containingCandidates.some((other) => {
+        if (hasDeckContainerHint(other)) return false;
+        if (!forcedSlideStrongSignal(other)) return false;
+        return forcedSlideScore(other, other.parentElement) >= candidateScore;
+      })
+    ) {
+      return false;
+    }
+
+    const containedCandidates = candidates.filter((other) => other !== candidate && candidate.contains(other));
+    if (containedCandidates.length >= 2 && hasDeckContainerHint(candidate)) return false;
+    if (containedCandidates.length >= 2 && !styleLooksPaged(candidate) && !computedStyleLooksPaged(candidate)) return false;
+    return true;
+  });
+}
+
+export function inferForcedDeckSlidesFromAll(root: ParentNode) {
+  const rootNode = root as Node;
+  const ownerDocument = rootNode.nodeType === 9 ? (rootNode as Document) : rootNode.ownerDocument;
+  const searchRoot = rootNode.nodeType === 9 ? ownerDocument?.body || ownerDocument?.documentElement : root;
+  if (!searchRoot) return [];
+
+  const candidates = Array.from(searchRoot.querySelectorAll("*"))
+    .filter((element) => forcedSlideCandidate(element, element.parentElement))
+    .sort((a, b) => {
+      if (a === b) return 0;
+      return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+    });
+  const pruned = pruneForcedSlideCandidates(candidates);
+  return pruned.length >= 2 ? pruned : [];
+}
+
+export function forcedSlidesShouldReplaceExisting(forcedSlides: Element[], existingSlides: Element[]) {
+  if (!forcedSlides.length) return false;
+  if (existingSlides.length <= 1) return true;
+  if (forcedSlides.length > existingSlides.length) return true;
+  if (forcedSlides.length !== existingSlides.length) return false;
+  if (existingSlides.every((slide, index) => slide === forcedSlides[index])) return false;
+  if (existingSlides.some((slide) => hasForcedWrapperHint(slide))) return true;
+  return existingSlides.some((slide) => forcedSlides.some((forcedSlide) => slide !== forcedSlide && slide.contains(forcedSlide)));
+}
+
 export function inferForcedDeckSlides(root: ParentNode) {
   const rootNode = root as Node;
   const ownerDocument = rootNode.nodeType === 9 ? (rootNode as Document) : rootNode.ownerDocument;
@@ -439,7 +519,10 @@ export function inferForcedDeckSlides(root: ParentNode) {
     if (children.length < 2 || children.length > 120) continue;
 
     const scored = children
-      .map((child) => ({ child, score: forcedSlideScore(child, containerElement) }))
+      .map((child) => {
+        const candidate = forcedSlideContentElement(child);
+        return { child: candidate, score: forcedSlideScore(candidate, candidate.parentElement || containerElement) };
+      })
       .filter((item) => item.score >= 3);
     if (scored.length < 2) continue;
 
@@ -449,7 +532,9 @@ export function inferForcedDeckSlides(root: ParentNode) {
     const itemHints = candidates.filter((candidate) => hasSlideItemHint(candidate)).length;
     const visualHints = candidates.filter((candidate) => forcedVisualSignal(candidate)).length;
     const pagedHints = candidates.filter((candidate) => styleLooksPaged(candidate) || computedStyleLooksPaged(candidate)).length;
-    if (!parentHint && !repeated && itemHints < 2 && scored.length < 3) continue;
+    const allStrong = scored.every((item) => item.score >= 6);
+    const allSlideLike = candidates.every(forcedSlideStrongSignal);
+    if (!parentHint && !repeated && itemHints < 2 && scored.length < 3 && !(allStrong && allSlideLike)) continue;
 
     const average = scored.reduce((total, item) => total + item.score, 0) / scored.length;
     const groupScore =
@@ -465,7 +550,11 @@ export function inferForcedDeckSlides(root: ParentNode) {
     }
   }
 
-  if (best?.slides.length) return best.slides;
+  const globalSlides = inferForcedDeckSlidesFromAll(root);
+  if (best?.slides.length) {
+    return forcedSlidesShouldReplaceExisting(globalSlides, best.slides) ? globalSlides : best.slides;
+  }
+  if (globalSlides.length) return globalSlides;
 
   const body = ownerDocument?.body;
   if (body && meaningfulForcedSlideElement(body)) return [body];
@@ -496,7 +585,7 @@ export function collectDeckSlides(root: ParentNode, options: { force?: boolean }
 
   if (options.force) {
     const forcedSlides = inferForcedDeckSlides(root);
-    if (forcedSlides.length && (slides.length <= 1 || forcedSlides.length > slides.length)) {
+    if (forcedSlidesShouldReplaceExisting(forcedSlides, slides)) {
       slides.length = 0;
       seen.clear();
       forcedSlides.forEach(addSlide);
