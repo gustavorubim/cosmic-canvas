@@ -1480,6 +1480,132 @@ button:disabled {
   animation: toast-in 160ms ease-out;
 }
 
+.pptx-report {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 89;
+  width: min(540px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(31, 41, 51, 0.22);
+}
+
+.pptx-report header {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.pptx-report header div {
+  display: grid;
+  gap: 3px;
+}
+
+.pptx-report header strong {
+  color: #26323f;
+  font-size: 14px;
+}
+
+.pptx-report header span,
+.pptx-report-status,
+.pptx-warning-list em {
+  color: #657086;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.pptx-report header button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d7dde5;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #52606d;
+  cursor: pointer;
+}
+
+.pptx-report-counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pptx-report-counts span {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e5e9ee;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #657086;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.pptx-report-counts strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #26323f;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.pptx-warning-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pptx-warning {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.pptx-warning button {
+  padding: 5px 8px;
+  border: 1px solid #cddcff;
+  border-radius: 7px;
+  background: #eef3ff;
+  color: #2857b8;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pptx-warning button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.pptx-warning code {
+  color: #7f2a1d;
+  font-size: 11px;
+}
+
+.pptx-warning span {
+  min-width: 0;
+  color: #52606d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;

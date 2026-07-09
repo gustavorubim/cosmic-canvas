@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   DECK_HINT_MESSAGE,
@@ -40,6 +40,9 @@ import {
   prepareEditableHtml,
   SAMPLE_HTML,
 } from "./htmlDocument";
+import { exportPowerPoint } from "./pptx/exportPowerPoint";
+import { summarizePptxExportReport } from "./pptx/exportReport";
+import type { PptxExportMode, PptxExportReport } from "./pptx/types";
 import {
   type DeckSlide,
   type EditorMode,
@@ -91,6 +94,12 @@ const modeLabels: Record<EditorMode, string> = {
 
 const modeOrder: EditorMode[] = ["text", "select", "move", "preview"];
 
+const pptxModeLabels: Record<PptxExportMode, string> = {
+  hybrid: "Hybrid",
+  editable: "Editable",
+  image: "Exact image",
+};
+
 const supportsFileSystemAccess =
   typeof window !== "undefined" && typeof (window as any).showSaveFilePicker === "function";
 
@@ -99,9 +108,25 @@ function fileNameFromDate() {
   return `cosmic-canvas-${stamp}.html`;
 }
 
+function pptxFileNameFromDate(mode: PptxExportMode) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `cosmic-canvas-${stamp}-${mode}.pptx`;
+}
+
 function normalizeEditableSource(html: string) {
   const normalized = normalizeHtmlInput(html);
   return normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+}
+
+async function blobToBase64(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+  }
+  return window.btoa(binary);
 }
 
 export default function App() {
@@ -151,6 +176,8 @@ export default function App() {
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [draftPrompt, setDraftPrompt] = useState<DraftRecord[]>([]);
+  const [pptxReport, setPptxReport] = useState<PptxExportReport | null>(null);
+  const [pptxExportingMode, setPptxExportingMode] = useState<PptxExportMode | null>(null);
 
   sourceHtmlRef.current = sourceHtml;
 
@@ -215,6 +242,7 @@ export default function App() {
     setDeckSlides([]);
     setAuditFindings([]);
     setActiveSlideId("");
+    setPptxReport(null);
     deckHintShownRef.current = false;
     setAppliedHtml(html);
     setFrameHtml(prepareEditableHtml(html, trustedScripts));
@@ -492,6 +520,15 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
+  function downloadBlob(blob: Blob, fileName: string) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function saveToFile() {
     const clean = cleanEditorHtml(sourceHtmlRef.current);
     if (vscodeApi) {
@@ -568,6 +605,50 @@ export default function App() {
     }
     downloadCleanHtml(printable, "print");
     showToast("Downloaded print HTML");
+  }
+
+  function previewDocumentForExport() {
+    if (sourceDirty) return null;
+    try {
+      return iframeRef.current?.contentDocument || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function downloadPowerPoint(mode: PptxExportMode) {
+    setPptxExportingMode(mode);
+    setPptxReport(null);
+    try {
+      showToast(`Preparing PowerPoint ${pptxModeLabels[mode]} export...`);
+      const result = await exportPowerPoint({
+        document: previewDocumentForExport(),
+        html: sourceHtmlRef.current,
+        mode,
+        fileBaseName: draftTitleRef.current || pptxFileNameFromDate(mode),
+      });
+      if (vscodeApi) {
+        vscodeApi.postMessage({
+          type: "downloadBinary",
+          fileName: result.fileName,
+          contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          base64: await blobToBase64(result.blob),
+        });
+      } else {
+        downloadBlob(result.blob, result.fileName);
+      }
+      setPptxReport(result.report);
+      showToast(summarizePptxExportReport(result.report));
+      if (result.report.warnings.length) {
+        console.warn("Cosmic Canvas PPTX export warnings", result.report.warnings);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(error);
+      showToast(`PowerPoint export failed: ${message}`);
+    } finally {
+      setPptxExportingMode(null);
+    }
   }
 
   function restoreDraft(draft: DraftRecord) {
@@ -806,6 +887,9 @@ export default function App() {
         onDownload={downloadHtml}
         onDownloadSelfContained={() => void downloadSelfContainedHtml()}
         onDownloadPrint={downloadPrintHtml}
+        onDownloadPowerPointHybrid={() => void downloadPowerPoint("hybrid")}
+        onDownloadPowerPointEditable={() => void downloadPowerPoint("editable")}
+        onDownloadPowerPointImage={() => void downloadPowerPoint("image")}
         onNormalize={normalizeCurrentDeck}
       />
 
@@ -1053,6 +1137,77 @@ export default function App() {
           )}
         </aside>
       </section>
+
+      {pptxExportingMode || pptxReport ? (
+        <section className="pptx-report" aria-live="polite" aria-label="PowerPoint export report">
+          <header>
+            <div>
+              <strong>PowerPoint export</strong>
+              <span>
+                {pptxExportingMode
+                  ? `${pptxModeLabels[pptxExportingMode]} in progress`
+                  : pptxReport
+                    ? `${pptxModeLabels[pptxReport.mode]} complete`
+                    : ""}
+              </span>
+            </div>
+            <button aria-label="Close PowerPoint export report" onClick={() => setPptxReport(null)} type="button">
+              <X size={16} aria-hidden="true" />
+            </button>
+          </header>
+          {pptxExportingMode ? (
+            <p className="pptx-report-status">Preparing slides, assets, and PowerPoint layers.</p>
+          ) : pptxReport ? (
+            <>
+              <div className="pptx-report-counts">
+                <span>
+                  <strong>{pptxReport.slideCount}</strong>
+                  Slides
+                </span>
+                <span>
+                  <strong>{pptxReport.editableObjectCount}</strong>
+                  Editable
+                </span>
+                <span>
+                  <strong>{pptxReport.rasterObjectCount}</strong>
+                  Images
+                </span>
+                <span>
+                  <strong>{pptxReport.skippedObjectCount}</strong>
+                  Skipped
+                </span>
+              </div>
+              {pptxReport.warnings.length ? (
+                <div className="pptx-warning-list">
+                  {pptxReport.warnings.slice(0, 7).map((warning, index) => {
+                    const slide = deckSlides[warning.slideIndex];
+                    return (
+                      <div className="pptx-warning" key={`${warning.slideIndex}-${warning.elementPath}-${warning.code}-${index}`}>
+                        <button
+                          disabled={!slide}
+                          onClick={() => {
+                            if (slide) goToDeckSlide(slide);
+                          }}
+                          type="button"
+                        >
+                          Slide {warning.slideIndex + 1}
+                        </button>
+                        <code>{warning.code}</code>
+                        <span>{warning.message}</span>
+                      </div>
+                    );
+                  })}
+                  {pptxReport.warnings.length > 7 ? (
+                    <em>{pptxReport.warnings.length - 7} more warnings in the console.</em>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="pptx-report-status">No export warnings.</p>
+              )}
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       {toasts.length ? (
         <div className="toast-stack" aria-live="polite">
