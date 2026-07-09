@@ -6,6 +6,7 @@ import { DeckTimeline } from "./components/DeckTimeline";
 import { FindPanel } from "./components/FindPanel";
 import { Inspector, InspectorEmpty } from "./components/Inspector";
 import { LayerPanel } from "./components/LayerPanel";
+import { ShortcutPanel } from "./components/ShortcutPanel";
 import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
@@ -46,6 +47,7 @@ import {
   type Viewport,
   type ZOrderAction,
 } from "./protocol";
+import { KEYBOARD_SHORTCUTS } from "./shortcuts";
 import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
 
 type HistoryState = {
@@ -59,7 +61,7 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data" | "audit" | "find" | "layers" | "checkpoints";
+type SidePanel = "inspect" | "data" | "audit" | "find" | "layers" | "checkpoints" | "shortcuts";
 
 type Toast = {
   id: number;
@@ -950,6 +952,13 @@ export default function App() {
               >
                 Saves
               </button>
+              <button
+                aria-pressed={sidePanel === "shortcuts"}
+                onClick={() => setSidePanel("shortcuts")}
+                type="button"
+              >
+                Keys
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
@@ -964,7 +973,9 @@ export default function App() {
                       ? `${layers.length} layers`
                       : sidePanel === "checkpoints"
                         ? `${checkpoints.length} saved`
-                        : `${auditFindings.length} issues`}
+                        : sidePanel === "shortcuts"
+                          ? `${KEYBOARD_SHORTCUTS.length} shortcuts`
+                          : `${auditFindings.length} issues`}
             </span>
           </div>
 
@@ -1017,6 +1028,8 @@ export default function App() {
               onCreate={createNamedCheckpoint}
               onRestore={restoreCheckpointById}
             />
+          ) : sidePanel === "shortcuts" ? (
+            <ShortcutPanel />
           ) : selected ? (
             <Inspector
               selected={selected}

@@ -1126,6 +1126,70 @@ button:disabled {
   outline: 1px solid rgba(15, 118, 110, 0.34);
 }
 
+.shortcut-panel {
+  min-height: 0;
+  padding: 12px;
+}
+
+.shortcut-list {
+  display: grid;
+  gap: 6px;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.shortcut-row span {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+.shortcut-row svg {
+  color: #0f766e;
+  grid-row: span 2;
+}
+
+.shortcut-row strong {
+  overflow: hidden;
+  color: #26323f;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-row em {
+  overflow: hidden;
+  color: #8795a1;
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-row kbd {
+  padding: 4px 6px;
+  border: 1px solid #b8c2cc;
+  border-radius: 6px;
+  color: #1f2933;
+  background: #f7fafc;
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .validation-finding {
   display: grid;
   grid-template-columns: auto 1fr;
