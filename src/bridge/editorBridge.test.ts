@@ -94,6 +94,25 @@ function latestFindMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-find").at(-1);
 }
 
+function latestLayersMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-layers").at(-1);
+}
+
+function stubRect(element: Element, rect: Partial<DOMRect>) {
+  const full = {
+    x: rect.left ?? 0,
+    y: rect.top ?? 0,
+    left: rect.left ?? 0,
+    top: rect.top ?? 0,
+    width: rect.width ?? 0,
+    height: rect.height ?? 0,
+    right: (rect.left ?? 0) + (rect.width ?? 0),
+    bottom: (rect.top ?? 0) + (rect.height ?? 0),
+    toJSON: () => ({}),
+  };
+  Object.defineProperty(element, "getBoundingClientRect", { configurable: true, value: () => full });
+}
+
 function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   target.dispatchEvent(
     new win.MouseEvent("click", {
@@ -670,6 +689,55 @@ describe("resize and layout controls", () => {
     expect(slide.style.display).toBe("flex");
     expect(slide.style.justifyContent).toBe("space-between");
     expect(slide.style.gap).toBe("16px");
+  });
+});
+
+describe("snap guides and layers", () => {
+  it("shows center snap guides when a move drag reaches parent center", () => {
+    const { win } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as HTMLElement;
+    const slide = paragraph.closest("section.slide") as HTMLElement;
+    stubRect(slide, { left: 0, top: 0, width: 200, height: 200 });
+    stubRect(paragraph, { left: 40, top: 40, width: 20, height: 20 });
+
+    postCommand(win, { command: "set-mode", mode: "move" });
+    pointer(win, paragraph, "pointerdown", 0, 0);
+    pointer(win, win.document, "pointermove", 50, 50);
+
+    const vertical = win.document.querySelector("[data-wysiwyg-snap-guide='vertical']") as HTMLElement;
+    const horizontal = win.document.querySelector("[data-wysiwyg-snap-guide='horizontal']") as HTMLElement;
+    expect(vertical.style.display).toBe("block");
+    expect(horizontal.style.display).toBe("block");
+    expect(vertical.style.left).toBe("100px");
+    expect(horizontal.style.top).toBe("100px");
+
+    pointer(win, win.document, "pointerup", 50, 50);
+    expect(vertical.style.display).toBe("none");
+    expect(horizontal.style.display).toBe("none");
+  });
+
+  it("brings the selected element forward and republishes layer order", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><head><title>Layers</title></head><body>
+        <section class="slide" data-title="Layers">
+          <p id="first">First</p>
+          <p id="second" style="z-index: 2">Second</p>
+        </section>
+      </body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    const first = win.document.getElementById("first") as HTMLElement;
+    click(win, first);
+
+    postCommand(win, { command: "z-order", action: "bring-forward" });
+
+    expect(first.style.position).toBe("relative");
+    expect(first.style.zIndex).toBe("3");
+    const layers = latestLayersMessage(messages).layers;
+    expect(layers.some((layer: { label: string; active: boolean }) => layer.label === "p#first" && layer.active)).toBe(
+      true,
+    );
   });
 });
 

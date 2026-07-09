@@ -1001,6 +1001,62 @@ button:disabled {
   font-size: 12px;
 }
 
+.layer-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.layer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.layer-actions button,
+.layer-list button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #b8c2cc;
+  border-radius: 8px;
+  color: #26323f;
+  background: #ffffff;
+  font-weight: 700;
+}
+
+.layer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.layer-list button {
+  justify-content: space-between;
+  text-align: left;
+}
+
+.layer-list button.is-active,
+.layer-list button[aria-pressed="true"] {
+  border-color: #0f766e;
+  color: #0f766e;
+  background: #eef8f6;
+}
+
+.layer-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-list em,
+.layer-list small {
+  color: #8795a1;
+  font-size: 12px;
+  font-style: normal;
+}
+
 .validation-finding {
   display: grid;
   grid-template-columns: auto 1fr;

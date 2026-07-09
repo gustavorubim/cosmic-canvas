@@ -208,6 +208,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     startY: number;
     baseDx: number;
     baseDy: number;
+    baseRect: DOMRect;
+    parentRect: DOMRect | null;
   } | null = null;
   let resizeState: {
     element: HTMLElement;
@@ -219,6 +221,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   let chip: HTMLDivElement | null = null;
   let chipLabel: HTMLSpanElement | null = null;
   let resizeHandle: HTMLButtonElement | null = null;
+  let verticalGuide: HTMLDivElement | null = null;
+  let horizontalGuide: HTMLDivElement | null = null;
 
   const fenceState = win.__cosmicFenceState || (win.__cosmicFenceState = { mode });
 
@@ -414,6 +418,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       scrollY: win.scrollY,
     });
     publishSelected();
+    publishLayers();
     scheduleDeckPublish();
     publishAudit();
   }
@@ -550,6 +555,59 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return resizeHandle;
   }
 
+  function ensureGuide(kind: "vertical" | "horizontal") {
+    const current = kind === "vertical" ? verticalGuide : horizontalGuide;
+    if (current) return current;
+    const guide = document.createElement("div");
+    guide.className = `wysiwyg-snap-guide wysiwyg-snap-guide-${kind}`;
+    guide.dataset.wysiwygEditor = "true";
+    guide.dataset.wysiwygSnapGuide = kind;
+    guide.style.display = "none";
+    document.body.append(guide);
+    if (kind === "vertical") verticalGuide = guide;
+    else horizontalGuide = guide;
+    return guide;
+  }
+
+  function hideSnapGuides() {
+    if (verticalGuide) verticalGuide.style.display = "none";
+    if (horizontalGuide) horizontalGuide.style.display = "none";
+  }
+
+  function updateSnapGuides(dx: number, dy: number) {
+    if (!dragState || !dragState.parentRect) {
+      hideSnapGuides();
+      return;
+    }
+    const tolerance = 2;
+    const parentRect = dragState.parentRect;
+    const rect = dragState.baseRect;
+    const centerX = rect.left + rect.width / 2 + dx;
+    const centerY = rect.top + rect.height / 2 + dy;
+    const parentCenterX = parentRect.left + parentRect.width / 2;
+    const parentCenterY = parentRect.top + parentRect.height / 2;
+    const vertical = ensureGuide("vertical");
+    const horizontal = ensureGuide("horizontal");
+
+    if (Math.abs(centerX - parentCenterX) <= tolerance) {
+      vertical.style.display = "block";
+      vertical.style.left = parentCenterX + win.scrollX + "px";
+      vertical.style.top = parentRect.top + win.scrollY + "px";
+      vertical.style.height = parentRect.height + "px";
+    } else {
+      vertical.style.display = "none";
+    }
+
+    if (Math.abs(centerY - parentCenterY) <= tolerance) {
+      horizontal.style.display = "block";
+      horizontal.style.left = parentRect.left + win.scrollX + "px";
+      horizontal.style.top = parentCenterY + win.scrollY + "px";
+      horizontal.style.width = parentRect.width + "px";
+    } else {
+      horizontal.style.display = "none";
+    }
+  }
+
   function updateResizeHandle() {
     if (!selectedElement || mode === "preview" || selectedElement === document.body) {
       if (resizeHandle) resizeHandle.style.display = "none";
@@ -621,6 +679,28 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         },
       },
     });
+    publishLayers();
+  }
+
+  function publishLayers() {
+    const parent = selectedElement?.parentElement || null;
+    if (!parent) {
+      post("wysiwyg-layers", { layers: [] });
+      return;
+    }
+    const layers = Array.from(parent.children)
+      .filter((element) => {
+        const htmlElement = element as HTMLElement;
+        return htmlElement.dataset.wysiwygEditor !== "true" && element.tagName.toLowerCase() !== "script";
+      })
+      .map((element) => ({
+        id: ensureId(element),
+        label: elementLabel(element),
+        active: element === selectedElement,
+        zIndex: (element as HTMLElement).style.zIndex || win.getComputedStyle(element).zIndex || "auto",
+      }))
+      .reverse();
+    post("wysiwyg-layers", { layers });
   }
 
   function restoreContentEditable(element: Element | null) {
@@ -1015,6 +1095,31 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       parent.style.gap = parent.style.gap || "16px";
       publishChange("layout");
     }
+  }
+
+  function siblingZValues(element: HTMLElement) {
+    const parent = element.parentElement;
+    if (!parent) return [0];
+    return Array.from(parent.children)
+      .filter((child) => child !== element && (child as HTMLElement).dataset.wysiwygEditor !== "true")
+      .map((child) => Number.parseInt((child as HTMLElement).style.zIndex || win.getComputedStyle(child).zIndex || "0", 10))
+      .filter((value) => Number.isFinite(value));
+  }
+
+  function setZOrder(action: unknown) {
+    if (!selectedElement || selectedElement === document.body) return;
+    const element = selectedElement as HTMLElement;
+    if (!element.style.position || element.style.position === "static") element.style.position = "relative";
+    const current = Number.parseInt(element.style.zIndex || win.getComputedStyle(element).zIndex || "0", 10) || 0;
+    const siblings = siblingZValues(element);
+    const min = Math.min(0, ...siblings);
+    const max = Math.max(0, ...siblings);
+    if (action === "bring-forward") element.style.zIndex = String(Math.max(current + 1, max + 1));
+    else if (action === "send-backward") element.style.zIndex = String(Math.min(current - 1, min - 1));
+    else if (action === "bring-to-front") element.style.zIndex = String(max + 1);
+    else if (action === "send-to-back") element.style.zIndex = String(min - 1);
+    else return;
+    publishChange("z-order");
   }
 
   function goToSlide(payload: Record<string, unknown>) {
@@ -1951,6 +2056,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         startY: event.clientY,
         baseDx: origin.dx,
         baseDy: origin.dy,
+        baseRect: htmlTarget.getBoundingClientRect(),
+        parentRect: htmlTarget.parentElement?.getBoundingClientRect() || null,
       };
       htmlTarget.setPointerCapture?.(event.pointerId);
     },
@@ -1973,6 +2080,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       event.preventDefault();
       const dx = Math.round(event.clientX - dragState.startX);
       const dy = Math.round(event.clientY - dragState.startY);
+      updateSnapGuides(dx, dy);
       setTranslate(dragState.element, dragState.baseDx + dx, dragState.baseDy + dy);
       publishSelected();
     },
@@ -1989,6 +2097,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       }
       if (!dragState) return;
       dragState = null;
+      hideSnapGuides();
       publishChange("move");
     },
     true,
@@ -2111,6 +2220,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "set-slide-background") setSlideBackground(data.color);
     if (data.command === "find-text") highlightFindText(data.query);
     if (data.command === "replace-text") replaceTextNodes(data.query, data.replacement);
+    if (data.command === "z-order") setZOrder(data.action);
     if (data.command === "duplicate") duplicateSelected();
     if (data.command === "duplicate-slide") duplicateSlide(data);
     if (data.command === "insert-slide") insertSlide(data);

@@ -19,6 +19,7 @@ export type SlideTemplateKind =
 export type LayoutAction = "align-left" | "align-center" | "align-right" | "distribute-horizontal";
 export type ImageFitMode = "fit" | "fill" | "crop";
 export type ChartType = "bar" | "line" | "pie";
+export type ZOrderAction = "bring-forward" | "send-backward" | "bring-to-front" | "send-to-back";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -63,6 +64,13 @@ export type DeckSlide = {
   thumbnailHtml: string;
 };
 
+export type LayerItem = {
+  id: string;
+  label: string;
+  active: boolean;
+  zIndex: string;
+};
+
 export type AuditFinding = {
   id: string;
   elementId: string;
@@ -76,6 +84,7 @@ export type BridgeMessage =
   | { type: "wysiwyg-ready"; title: string; bodyTextStart: string }
   | { type: "wysiwyg-selection"; selected: SelectedElement | null }
   | { type: "wysiwyg-deck"; slides: DeckSlide[]; activeId: string }
+  | { type: "wysiwyg-layers"; layers: LayerItem[] }
   | { type: "wysiwyg-audit"; findings: AuditFinding[] }
   | { type: "wysiwyg-find"; query: string; count: number }
   | { type: "wysiwyg-shortcut"; action: "save" | "apply-source" | "undo" | "redo" }
@@ -103,6 +112,7 @@ export type BridgeCommand =
   | { command: "set-slide-background"; color: string }
   | { command: "find-text"; query: string }
   | { command: "replace-text"; query: string; replacement: string }
+  | { command: "z-order"; action: ZOrderAction }
   | { command: "duplicate" }
   | { command: "delete" }
   | { command: "duplicate-slide"; id: string }
@@ -130,6 +140,7 @@ export const BRIDGE_MESSAGE_TYPES = [
   "wysiwyg-ready",
   "wysiwyg-selection",
   "wysiwyg-deck",
+  "wysiwyg-layers",
   "wysiwyg-audit",
   "wysiwyg-find",
   "wysiwyg-shortcut",

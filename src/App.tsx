@@ -4,6 +4,7 @@ import { DataPanel } from "./components/DataPanel";
 import { DeckTimeline } from "./components/DeckTimeline";
 import { FindPanel } from "./components/FindPanel";
 import { Inspector, InspectorEmpty } from "./components/Inspector";
+import { LayerPanel } from "./components/LayerPanel";
 import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
@@ -31,10 +32,12 @@ import {
   type ChartType,
   type ImageFitMode,
   type InlineFormatAction,
+  type LayerItem,
   type LayoutAction,
   type SelectedElement,
   type SlideTemplateKind,
   type Viewport,
+  type ZOrderAction,
 } from "./protocol";
 import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
 
@@ -49,7 +52,7 @@ type PreviewStatus = {
   bodyTextStart: string;
 };
 
-type SidePanel = "inspect" | "data" | "audit" | "find";
+type SidePanel = "inspect" | "data" | "audit" | "find" | "layers";
 
 type Toast = {
   id: number;
@@ -113,6 +116,7 @@ export default function App() {
   const [sourceVisible, setSourceVisible] = useState(true);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
   const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
+  const [layers, setLayers] = useState<LayerItem[]>([]);
   const [findQuery, setFindQuery] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [findCount, setFindCount] = useState(0);
@@ -383,6 +387,10 @@ export default function App() {
     postCommand("replace-text", { query: findQuery, replacement: replaceText });
   }
 
+  function updateZOrder(action: ZOrderAction) {
+    postCommand("z-order", { action });
+  }
+
   function stepHistory(offset: number) {
     const current = historyRef.current;
     const nextIndex = current.index + offset;
@@ -583,6 +591,10 @@ export default function App() {
           deckHintShownRef.current = true;
           showToast("Edit modes type text - use the timeline for slides. Preview runs deck shortcuts.");
         }
+      }
+
+      if (data.type === "wysiwyg-layers") {
+        setLayers(data.layers);
       }
 
       if (data.type === "wysiwyg-audit") {
@@ -895,6 +907,9 @@ export default function App() {
               <button aria-pressed={sidePanel === "find"} onClick={() => setSidePanel("find")} type="button">
                 Find
               </button>
+              <button aria-pressed={sidePanel === "layers"} onClick={() => setSidePanel("layers")} type="button">
+                Layers
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
@@ -905,6 +920,8 @@ export default function App() {
                   ? `${Math.max(0, dataRows.length - 1)} rows`
                   : sidePanel === "find"
                     ? `${findCount} matches`
+                    : sidePanel === "layers"
+                      ? `${layers.length} layers`
                     : `${auditFindings.length} issues`}
             </span>
           </div>
@@ -940,6 +957,15 @@ export default function App() {
               onReplacement={setReplaceText}
               onFind={findInDocument}
               onReplace={replaceInDocument}
+            />
+          ) : sidePanel === "layers" ? (
+            <LayerPanel
+              layers={layers}
+              onSelect={(id) => {
+                setSidePanel("inspect");
+                postCommand("select", { id });
+              }}
+              onZOrder={updateZOrder}
             />
           ) : selected ? (
             <Inspector

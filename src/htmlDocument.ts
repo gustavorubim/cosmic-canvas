@@ -226,6 +226,22 @@ const EDITOR_STYLE = `
     border-right: 1px solid rgba(255, 255, 255, 0.86);
     border-bottom: 1px solid rgba(255, 255, 255, 0.86);
   }
+
+  .wysiwyg-snap-guide {
+    position: absolute;
+    z-index: 2147483646;
+    pointer-events: none;
+    background: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+  }
+
+  .wysiwyg-snap-guide-vertical {
+    width: 2px;
+  }
+
+  .wysiwyg-snap-guide-horizontal {
+    height: 2px;
+  }
 `;
 
 function parseDocument(html: string): Document {
