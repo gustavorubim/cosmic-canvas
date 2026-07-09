@@ -1,6 +1,7 @@
 node_modules
 dist
 out
+tmp
 *.vsix
 /public/stress-fixtures/*.html
 .DS_Store
