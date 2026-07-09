@@ -1216,6 +1216,196 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     row.append(cell);
   }
 
+  function numericValue(value: string) {
+    const parsed = Number.parseFloat(String(value || "").replace(/[$,%\s,]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function chartData(payload: Record<string, unknown>) {
+    const columns = payloadCells(payload?.columns);
+    const rows = Array.isArray(payload?.rows) ? payload.rows.map((row) => payloadCells(row)) : [];
+    if (columns.length < 2 || !rows.length) return null;
+    const valueIndex = columns.findIndex((_, index) => index > 0 && rows.some((row) => numericValue(row[index] || "") !== 0));
+    const metricIndex = valueIndex > 0 ? valueIndex : 1;
+    const points = rows
+      .map((row) => ({
+        label: row[0] || "",
+        value: numericValue(row[metricIndex] || ""),
+      }))
+      .filter((point) => point.label || point.value !== 0);
+    if (!points.length) return null;
+    return {
+      labelName: columns[0] || "Label",
+      valueName: columns[metricIndex] || "Value",
+      points,
+    };
+  }
+
+  function svgElement(tagName: string) {
+    return document.createElementNS("http://www.w3.org/2000/svg", tagName);
+  }
+
+  function setSvgAttrs(element: Element, attrs: Record<string, string | number>) {
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  }
+
+  function appendSvgText(svg: SVGElement, x: number, y: number, text: string, attrs: Record<string, string | number> = {}) {
+    const node = svgElement("text");
+    setSvgAttrs(node, { x, y, fill: "#52606d", "font-size": 13, "font-family": "Inter, Arial, sans-serif", ...attrs });
+    node.textContent = text;
+    svg.append(node);
+  }
+
+  function buildBarChart(data: { labelName: string; valueName: string; points: Array<{ label: string; value: number }> }) {
+    const svg = svgElement("svg") as SVGElement;
+    setSvgAttrs(svg, { viewBox: "0 0 720 420", role: "img", "aria-label": data.valueName + " by " + data.labelName });
+    const max = Math.max(...data.points.map((point) => point.value), 1);
+    const chartX = 74;
+    const chartY = 54;
+    const chartWidth = 590;
+    const chartHeight = 250;
+    const gap = 18;
+    const barWidth = Math.max(22, (chartWidth - gap * (data.points.length - 1)) / data.points.length);
+
+    const axis = svgElement("path");
+    setSvgAttrs(axis, {
+      d: `M${chartX} ${chartY}V${chartY + chartHeight}H${chartX + chartWidth}`,
+      fill: "none",
+      stroke: "#8795a1",
+      "stroke-width": 2,
+    });
+    svg.append(axis);
+
+    data.points.forEach((point, index) => {
+      const height = Math.round((point.value / max) * chartHeight);
+      const x = chartX + index * (barWidth + gap);
+      const y = chartY + chartHeight - height;
+      const rect = svgElement("rect");
+      rect.classList.add("cosmic-chart-bar");
+      setSvgAttrs(rect, {
+        x,
+        y,
+        width: Math.round(barWidth),
+        height,
+        rx: 5,
+        fill: "#0f766e",
+        "data-label": point.label,
+        "data-value": point.value,
+      });
+      svg.append(rect);
+      appendSvgText(svg, x + barWidth / 2, chartY + chartHeight + 24, point.label, {
+        "text-anchor": "middle",
+      });
+      appendSvgText(svg, x + barWidth / 2, y - 8, String(point.value), {
+        "text-anchor": "middle",
+        fill: "#26323f",
+        "font-weight": 800,
+      });
+    });
+
+    appendSvgText(svg, chartX + chartWidth / 2, 386, data.labelName, { "text-anchor": "middle", "font-weight": 800 });
+    appendSvgText(svg, 22, chartY + chartHeight / 2, data.valueName, {
+      transform: `rotate(-90 22 ${chartY + chartHeight / 2})`,
+      "text-anchor": "middle",
+      "font-weight": 800,
+    });
+    return svg;
+  }
+
+  function buildLineChart(data: { labelName: string; valueName: string; points: Array<{ label: string; value: number }> }) {
+    const svg = svgElement("svg") as SVGElement;
+    setSvgAttrs(svg, { viewBox: "0 0 720 420", role: "img", "aria-label": data.valueName + " by " + data.labelName });
+    const max = Math.max(...data.points.map((point) => point.value), 1);
+    const chartX = 74;
+    const chartY = 54;
+    const chartWidth = 590;
+    const chartHeight = 250;
+    const step = data.points.length <= 1 ? chartWidth : chartWidth / (data.points.length - 1);
+    const points = data.points.map((point, index) => {
+      const x = chartX + index * step;
+      const y = chartY + chartHeight - (point.value / max) * chartHeight;
+      return { ...point, x, y };
+    });
+    const axis = svgElement("path");
+    setSvgAttrs(axis, {
+      d: `M${chartX} ${chartY}V${chartY + chartHeight}H${chartX + chartWidth}`,
+      fill: "none",
+      stroke: "#8795a1",
+      "stroke-width": 2,
+    });
+    svg.append(axis);
+    const polyline = svgElement("polyline");
+    polyline.classList.add("cosmic-chart-line");
+    setSvgAttrs(polyline, {
+      points: points.map((point) => `${Math.round(point.x)},${Math.round(point.y)}`).join(" "),
+      fill: "none",
+      stroke: "#0f766e",
+      "stroke-width": 4,
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    });
+    svg.append(polyline);
+    points.forEach((point) => {
+      const circle = svgElement("circle");
+      setSvgAttrs(circle, { cx: point.x, cy: point.y, r: 5, fill: "#d97706" });
+      svg.append(circle);
+      appendSvgText(svg, point.x, chartY + chartHeight + 24, point.label, { "text-anchor": "middle" });
+    });
+    appendSvgText(svg, chartX + chartWidth / 2, 386, data.labelName, { "text-anchor": "middle", "font-weight": 800 });
+    appendSvgText(svg, 22, chartY + chartHeight / 2, data.valueName, {
+      transform: `rotate(-90 22 ${chartY + chartHeight / 2})`,
+      "text-anchor": "middle",
+      "font-weight": 800,
+    });
+    return svg;
+  }
+
+  function piePath(cx: number, cy: number, radius: number, start: number, end: number) {
+    const startX = cx + radius * Math.cos(start);
+    const startY = cy + radius * Math.sin(start);
+    const endX = cx + radius * Math.cos(end);
+    const endY = cy + radius * Math.sin(end);
+    const large = end - start > Math.PI ? 1 : 0;
+    return `M${cx} ${cy}L${startX} ${startY}A${radius} ${radius} 0 ${large} 1 ${endX} ${endY}Z`;
+  }
+
+  function buildPieChart(data: { labelName: string; valueName: string; points: Array<{ label: string; value: number }> }) {
+    const svg = svgElement("svg") as SVGElement;
+    setSvgAttrs(svg, { viewBox: "0 0 720 420", role: "img", "aria-label": data.valueName + " by " + data.labelName });
+    const total = Math.max(data.points.reduce((sum, point) => sum + Math.max(0, point.value), 0), 1);
+    const colors = ["#0f766e", "#d97706", "#2563eb", "#7c3aed", "#cf513d", "#52606d"];
+    let angle = -Math.PI / 2;
+    data.points.forEach((point, index) => {
+      const next = angle + (Math.max(0, point.value) / total) * Math.PI * 2;
+      const path = svgElement("path");
+      path.classList.add("cosmic-chart-slice");
+      setSvgAttrs(path, {
+        d: piePath(250, 200, 132, angle, next),
+        fill: colors[index % colors.length],
+        "data-label": point.label,
+        "data-value": point.value,
+      });
+      svg.append(path);
+      const legendY = 96 + index * 28;
+      const swatch = svgElement("rect");
+      setSvgAttrs(swatch, { x: 440, y: legendY - 13, width: 14, height: 14, rx: 3, fill: colors[index % colors.length] });
+      svg.append(swatch);
+      appendSvgText(svg, 464, legendY, `${point.label} (${point.value})`, { fill: "#26323f" });
+      angle = next;
+    });
+    appendSvgText(svg, 250, 370, data.valueName + " by " + data.labelName, {
+      "text-anchor": "middle",
+      "font-weight": 800,
+    });
+    return svg;
+  }
+
+  function buildChartSvg(type: string, data: { labelName: string; valueName: string; points: Array<{ label: string; value: number }> }) {
+    if (type === "line") return buildLineChart(data);
+    if (type === "pie") return buildPieChart(data);
+    return buildBarChart(data);
+  }
+
   function dataInsertionPoint() {
     const slide = nearestSlide(slideCandidates());
     if (slide) return { element: slide, placement: "append" };
@@ -1351,6 +1541,36 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     selectElement(figure);
     figure.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
     publishChange("insert-table");
+  }
+
+  function insertDataChart(payload: Record<string, unknown>) {
+    const data = chartData(payload);
+    if (!data) return;
+    const type = String(payload.chartType || "bar");
+    const figure = document.createElement("figure");
+    figure.className = "cosmic-chart-block";
+    figure.setAttribute("data-cosmic-artifact", "chart");
+    figure.setAttribute("data-chart-type", type === "line" || type === "pie" ? type : "bar");
+
+    const title = textValue(payload?.title);
+    if (title) {
+      const caption = document.createElement("figcaption");
+      caption.textContent = title;
+      figure.append(caption);
+    }
+
+    figure.append(buildChartSvg(type, data));
+
+    const insertion = dataInsertionPoint();
+    if (insertion.placement === "after") {
+      insertion.element.after(figure);
+    } else {
+      insertion.element.append(figure);
+    }
+
+    selectElement(figure);
+    figure.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    publishChange("insert-chart");
   }
 
   function exitEditing() {
@@ -1798,6 +2018,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (data.command === "insert-element") insertElement(data);
     if (data.command === "format-inline") formatInline(data);
     if (data.command === "insert-table") insertDataTable(data);
+    if (data.command === "insert-chart") insertDataChart(data);
     if (data.command === "delete") deleteSelected();
     if (data.command === "go-slide") goToSlide(data);
     if (data.command === "nudge") nudge(Number(data.dx || 0), Number(data.dy || 0));

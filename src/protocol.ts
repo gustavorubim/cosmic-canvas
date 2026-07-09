@@ -18,6 +18,7 @@ export type SlideTemplateKind =
   | "closing";
 export type LayoutAction = "align-left" | "align-center" | "align-right" | "distribute-horizontal";
 export type ImageFitMode = "fit" | "fill" | "crop";
+export type ChartType = "bar" | "line" | "pie";
 
 /** A single hop in the selected element's ancestor breadcrumb (root → element). */
 export type BreadcrumbNode = {
@@ -113,6 +114,7 @@ export type BridgeCommand =
       href?: string;
     }
   | { command: "insert-table"; columns: string[]; rows: string[][]; title: string }
+  | { command: "insert-chart"; chartType: ChartType; columns: string[]; rows: string[][]; title: string }
   | { command: "go-slide"; id: string }
   | { command: "nudge"; dx: number; dy: number }
   | { command: "layout"; action: LayoutAction }

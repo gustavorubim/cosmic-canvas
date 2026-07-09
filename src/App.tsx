@@ -19,6 +19,7 @@ import {
   type EditorMode,
   isBridgeMessage,
   type AuditFinding,
+  type ChartType,
   type ImageFitMode,
   type InlineFormatAction,
   type LayoutAction,
@@ -307,6 +308,14 @@ export default function App() {
     const rows = normalized.slice(1).filter((row) => row.some((cell) => cell.trim() !== ""));
     if (!rows.length) return;
     postCommand("insert-table", { columns, rows, title: dataTitle.trim() });
+  }
+
+  function insertDataChart(chartType: ChartType) {
+    const normalized = normalizeDataRows(dataRows);
+    const columns = normalized[0].map((cell, index) => cell.trim() || `Column ${index + 1}`);
+    const rows = normalized.slice(1).filter((row) => row.some((cell) => cell.trim() !== ""));
+    if (!rows.length) return;
+    postCommand("insert-chart", { chartType, columns, rows, title: dataTitle.trim() });
   }
 
   function updateSelectedStyle(styles: Record<string, string>) {
@@ -847,6 +856,7 @@ export default function App() {
               onAddRow={addDataRow}
               onAddColumn={addDataColumn}
               onInsert={insertDataTable}
+              onInsertChart={insertDataChart}
             />
           ) : sidePanel === "audit" ? (
             <ValidationPanel

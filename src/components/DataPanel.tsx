@@ -1,4 +1,5 @@
-import { Plus, Table2 } from "lucide-react";
+import { BarChart3, LineChart, PieChart, Plus, Table2 } from "lucide-react";
+import { type ChartType } from "../protocol";
 
 type DataPanelProps = {
   dataTitle: string;
@@ -11,6 +12,7 @@ type DataPanelProps = {
   onAddRow: () => void;
   onAddColumn: () => void;
   onInsert: () => void;
+  onInsertChart: (type: ChartType) => void;
 };
 
 export function DataPanel({
@@ -24,6 +26,7 @@ export function DataPanel({
   onAddRow,
   onAddColumn,
   onInsert,
+  onInsertChart,
 }: DataPanelProps) {
   return (
     <div className="data-panel">
@@ -53,7 +56,19 @@ export function DataPanel({
         </button>
         <button className="primary" type="button" onClick={onInsert} title="Insert data table">
           <Table2 size={16} aria-hidden="true" />
-          Insert
+          Table
+        </button>
+        <button type="button" onClick={() => onInsertChart("bar")} title="Insert bar chart">
+          <BarChart3 size={16} aria-hidden="true" />
+          Bar
+        </button>
+        <button type="button" onClick={() => onInsertChart("line")} title="Insert line chart">
+          <LineChart size={16} aria-hidden="true" />
+          Line
+        </button>
+        <button type="button" onClick={() => onInsertChart("pie")} title="Insert pie chart">
+          <PieChart size={16} aria-hidden="true" />
+          Pie
         </button>
       </div>
 

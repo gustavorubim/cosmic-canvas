@@ -754,6 +754,64 @@ describe("theme controls", () => {
   });
 });
 
+describe("data chart insertion", () => {
+  it("inserts a proportional inline SVG bar chart with axis labels", () => {
+    const { win } = installBridgeWithHostileDeck();
+
+    postCommand(win, {
+      command: "insert-chart",
+      chartType: "bar",
+      title: "Revenue chart",
+      columns: ["Quarter", "Revenue"],
+      rows: [
+        ["Q1", "10"],
+        ["Q2", "20"],
+      ],
+    });
+
+    const figure = win.document.querySelector(".cosmic-chart-block[data-chart-type='bar']") as HTMLElement;
+    const bars = Array.from(figure.querySelectorAll("rect.cosmic-chart-bar"));
+    expect(figure.querySelector("figcaption")?.textContent).toBe("Revenue chart");
+    expect(bars).toHaveLength(2);
+    expect(bars[0].getAttribute("height")).toBe("125");
+    expect(bars[1].getAttribute("height")).toBe("250");
+    expect(figure.textContent).toContain("Quarter");
+    expect(figure.textContent).toContain("Revenue");
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).toContain("<svg");
+    expect(cleaned).toContain("cosmic-chart-bar");
+    const cleanedChart = cleaned.match(/<figure class="cosmic-chart-block"[\s\S]*?<\/figure>/)?.[0] || "";
+    expect(cleanedChart).not.toContain("<script");
+    expect(cleanedChart).not.toContain("<img");
+    expect(cleanedChart).not.toContain("src=");
+    expect(cleanedChart).not.toContain("href=");
+  });
+
+  it.each([
+    ["line", ".cosmic-chart-line"],
+    ["pie", ".cosmic-chart-slice"],
+  ])("inserts a %s chart variant", (chartType, selector) => {
+    const { win } = installBridgeWithHostileDeck();
+
+    postCommand(win, {
+      command: "insert-chart",
+      chartType,
+      title: "Variant chart",
+      columns: ["Segment", "Count"],
+      rows: [
+        ["A", "4"],
+        ["B", "6"],
+      ],
+    });
+
+    const figure = win.document.querySelector(`.cosmic-chart-block[data-chart-type='${chartType}']`) as HTMLElement;
+    expect(figure).not.toBeNull();
+    expect(figure.querySelectorAll(selector).length).toBeGreaterThan(0);
+    expect(figure.querySelector("svg")?.getAttribute("role")).toBe("img");
+  });
+});
+
 describe("validation audit", () => {
   it("reports document quality findings with selectable element ids", () => {
     const { win, messages } = createWindow(`
