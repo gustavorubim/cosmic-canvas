@@ -189,6 +189,145 @@ export function isSlidePartElement(element: Element) {
   });
 }
 
+export function elementDescriptorText(element: Element) {
+  return [
+    element.tagName,
+    element.id,
+    element.className,
+    element.getAttribute("role"),
+    element.getAttribute("aria-roledescription"),
+    element.getAttribute("aria-label"),
+    element.getAttribute("data-kind"),
+    element.getAttribute("data-type"),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+export function hasTokenMatch(element: Element, pattern: RegExp) {
+  return pattern.test(elementDescriptorText(element));
+}
+
+export function hasDeckContainerHint(element: Element | null) {
+  if (!element) return false;
+  return hasTokenMatch(
+    element,
+    /(^|[\s_-])(deck|slides?|presentation|presenter|carousel|swiper|pages?|screens?|frames?|story|document|report)([\s_-]|$)/,
+  );
+}
+
+export function hasSlideItemHint(element: Element) {
+  return (
+    element.getAttribute("aria-roledescription")?.toLowerCase() === "slide" ||
+    hasTokenMatch(
+      element,
+      /(^|[\s_-])(slide|page|screen|panel|frame|card|view|sheet|artboard|canvas|spread)([\s_-]|$)/,
+    )
+  );
+}
+
+export function hasNonSlideChromeHint(element: Element) {
+  return hasTokenMatch(
+    element,
+    /(^|[\s_-])(nav|navbar|menu|toolbar|sidebar|aside|footer|masthead|controls?|pagination|dots?|thumbs?|thumbnail|notes?|speaker|caption|legend|modal|dialog)([\s_-]|$)/,
+  );
+}
+
+export function styleLooksPaged(element: Element) {
+  const style = element.getAttribute("style") || "";
+  return /(width|min-width|max-width|height|min-height|max-height|aspect-ratio)\s*:|(?:100|90|80)vh|(?:540|720|768|900|960|1024|1080|1200|1280|1366|1440|1600|1920)px/i.test(
+    style,
+  );
+}
+
+export function structuralSlideScore(element: Element, parent: Element | null) {
+  if ((element as HTMLElement).dataset?.wysiwygEditor === "true") return -Infinity;
+  if (element.closest('[data-wysiwyg-editor="true"]')) return -Infinity;
+  if (isRevealStackElement(element) || isSlidePartElement(element) || hasNonSlideChromeHint(element)) return -Infinity;
+
+  const tag = element.tagName.toLowerCase();
+  if (["script", "style", "template", "link", "meta", "nav", "footer", "header", "aside"].includes(tag)) {
+    return -Infinity;
+  }
+
+  const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+  if (text.length < 20) return -Infinity;
+
+  let score = 0;
+  if (hasSlideItemHint(element)) score += 4;
+  if (hasDeckContainerHint(parent)) score += 3;
+  if (styleLooksPaged(element)) score += 3;
+  if (element.querySelector("h1, h2, h3, [role='heading']")) score += 2;
+  if (/(\bslide\b|\bpage\b)\s*\d+(\s*(of|\/)\s*\d+)?/i.test(text)) score += 2;
+  if (text.length >= 80) score += 1;
+  if (element.children.length >= 2) score += 1;
+  if (["section", "article"].includes(tag)) score += 1;
+
+  return score;
+}
+
+export function classSignature(element: Element) {
+  const stableClasses = Array.from(element.classList)
+    .map((name) => name.toLowerCase())
+    .filter((name) => !/^(active|current|selected|visible|hidden|show|open|closed|enter|exit|previous|next)$/.test(name))
+    .sort();
+  return `${element.tagName.toLowerCase()}|${stableClasses.join(".")}`;
+}
+
+export function hasRepeatedSiblingShape(elements: Element[]) {
+  const counts = new Map<string, number>();
+  for (const element of elements) {
+    const key = classSignature(element);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return Array.from(counts.values()).some((count) => count >= 2);
+}
+
+export function inferStructuralDeckSlides(root: ParentNode) {
+  const rootNode = root as Node;
+  const ownerDocument = rootNode.nodeType === 9 ? (rootNode as Document) : rootNode.ownerDocument;
+  const searchRoot = rootNode.nodeType === 9 ? ownerDocument?.body || ownerDocument?.documentElement : root;
+  if (!searchRoot) return [];
+
+  const containers = [
+    searchRoot,
+    ...Array.from(searchRoot.querySelectorAll("main, [role='main'], body *")).filter((element) => {
+      return element.children.length >= 2 && element.children.length <= 80;
+    }),
+  ];
+  let best: { slides: Element[]; score: number } | null = null;
+
+  for (const container of containers) {
+    if ((container as Node).nodeType !== 1) continue;
+    const containerElement = container as Element;
+    if (hasNonSlideChromeHint(containerElement)) continue;
+    const children = Array.from(containerElement.children).filter((child) => {
+      return (child as HTMLElement).dataset?.wysiwygEditor !== "true";
+    });
+    if (children.length < 2 || children.length > 80) continue;
+
+    const parentHint = hasDeckContainerHint(containerElement);
+    const scored = children
+      .map((child) => ({ child, score: structuralSlideScore(child, containerElement) }))
+      .filter((item) => item.score >= (parentHint ? 5 : 7));
+    if (scored.length < 2) continue;
+
+    const candidates = scored.map((item) => item.child);
+    const repeated = hasRepeatedSiblingShape(candidates);
+    const allStrong = scored.every((item) => item.score >= 7);
+    if (!parentHint && !repeated && !allStrong) continue;
+
+    const average = scored.reduce((total, item) => total + item.score, 0) / scored.length;
+    const groupScore = candidates.length * 10 + average + (parentHint ? 10 : 0) + (repeated ? 4 : 0);
+    if (!best || groupScore > best.score) {
+      best = { slides: candidates, score: groupScore };
+    }
+  }
+
+  return best?.slides || [];
+}
+
 export function collectDeckSlides(root: ParentNode) {
   const seen = new Set<Element>();
   const slides: Element[] = [];
@@ -205,6 +344,10 @@ export function collectDeckSlides(root: ParentNode) {
 
   for (const selector of deckSlideSelectorList()) {
     root.querySelectorAll(selector).forEach(addSlide);
+  }
+
+  if (!slides.length) {
+    inferStructuralDeckSlides(root).forEach(addSlide);
   }
 
   return slides

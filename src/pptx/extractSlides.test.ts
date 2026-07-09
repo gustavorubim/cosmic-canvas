@@ -54,6 +54,33 @@ describe("extractPptxSlides", () => {
     ]);
   });
 
+  it("infers generated full-frame slide siblings with no explicit markers", () => {
+    const doc = parse(`<!doctype html><html><body>
+      <main id="pipeline">
+        <div class="workspace">
+          <div class="screen-frame" style="width: 1366px; height: 768px;">
+            <h1>Automated Daily Liquidity Analysis</h1>
+            <p>Page 1 of 3 with regulatory lineage, control metrics, and sponsor information.</p>
+          </div>
+          <div class="screen-frame" style="width: 1366px; height: 768px;">
+            <h1>High-Velocity Regulatory Lineage</h1>
+            <p>Page 2 of 3 with operational dependencies, review windows, and exception status.</p>
+          </div>
+          <div class="screen-frame" style="width: 1366px; height: 768px;">
+            <h1>NSFR Analytics Summary</h1>
+            <p>Page 3 of 3 with analyst sign-off, evidence links, and daily closeout actions.</p>
+          </div>
+        </div>
+      </main>
+    </body></html>`);
+
+    expect(extractPptxSlides(doc).map((slide) => slide.title)).toEqual([
+      "Automated Daily Liquidity Analysis",
+      "High-Velocity Regulatory Lineage",
+      "NSFR Analytics Summary",
+    ]);
+  });
+
   it("falls back to a page export candidate when no deck is detected", () => {
     const slides = extractPptxSlides(parse("<main><h1>One page</h1><p>Export me</p></main>"));
 

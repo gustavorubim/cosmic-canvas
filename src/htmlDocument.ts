@@ -3,11 +3,21 @@ import {
   collectDeckSlides,
   deckSlideSelector,
   editableTextTarget,
+  elementDescriptorText,
   inTypingContextForElement,
+  classSignature,
+  hasDeckContainerHint,
+  hasNonSlideChromeHint,
+  hasRepeatedSiblingShape,
+  hasSlideItemHint,
+  hasTokenMatch,
+  inferStructuralDeckSlides,
   installEditorBridge,
   installKeyboardFence,
   isRevealStackElement,
   isSlidePartElement,
+  structuralSlideScore,
+  styleLooksPaged,
 } from "./bridge/editorBridge";
 
 const NONE = "__wysiwyg_none__";
@@ -476,6 +486,16 @@ function bridgeHelperSource() {
     deckSlideSelector.toString(),
     isRevealStackElement.toString(),
     isSlidePartElement.toString(),
+    elementDescriptorText.toString(),
+    hasTokenMatch.toString(),
+    hasDeckContainerHint.toString(),
+    hasSlideItemHint.toString(),
+    hasNonSlideChromeHint.toString(),
+    styleLooksPaged.toString(),
+    structuralSlideScore.toString(),
+    classSignature.toString(),
+    hasRepeatedSiblingShape.toString(),
+    inferStructuralDeckSlides.toString(),
     collectDeckSlides.toString(),
   ].join("\n");
 }

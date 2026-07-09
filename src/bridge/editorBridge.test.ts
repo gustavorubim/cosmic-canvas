@@ -216,6 +216,50 @@ describe("bridge helpers", () => {
       "aria-slide",
     ]);
   });
+
+  it("infers repeated page-like siblings when explicit slide markers are absent", () => {
+    const { win } = createWindow(`
+      <main id="generated-report">
+        <nav>Global controls</nav>
+        <div id="stage">
+          <div id="screen-1" class="screen-frame" style="width: 1280px; height: 720px;">
+            <header>Executive presentment</header>
+            <h1>Liquidity Control Tower</h1>
+            <p>Slide 1 of 3. Daily liquidity analysis with regulatory thresholds, funding velocity, and control exceptions.</p>
+          </div>
+          <div id="screen-2" class="screen-frame" style="width: 1280px; height: 720px;">
+            <header>High velocity flows</header>
+            <h1>Intraday Watchlist</h1>
+            <p>Slide 2 of 3. Settlement windows, balances, and exception queues are grouped for operating review.</p>
+          </div>
+          <div id="screen-3" class="screen-frame" style="width: 1280px; height: 720px;">
+            <header>Closeout</header>
+            <h1>Escalation Paths</h1>
+            <p>Slide 3 of 3. Decision owners and timing are listed for follow-up during the next review cycle.</p>
+          </div>
+          <aside class="speaker-notes">Internal notes should not become a slide.</aside>
+        </div>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document).map((slide) => slide.id)).toEqual([
+      "screen-1",
+      "screen-2",
+      "screen-3",
+    ]);
+  });
+
+  it("does not infer ordinary repeated article content as a deck", () => {
+    const { win } = createWindow(`
+      <main>
+        <article><h2>First update</h2><p>This is a normal article card with enough text to be meaningful but no page-like sizing or naming.</p></article>
+        <article><h2>Second update</h2><p>This is another normal article card with enough text to be meaningful but no page-like sizing or naming.</p></article>
+        <article><h2>Third update</h2><p>This is a third normal article card with enough text to be meaningful but no page-like sizing or naming.</p></article>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+  });
 });
 
 describe("editor bridge extraction", () => {
