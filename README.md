@@ -38,6 +38,7 @@ Use it when you want to:
 - Undo and redo document snapshots, with scroll position preserved.
 - Keyboard shortcuts for save, undo/redo, delete, nudge, and deselect.
 - Copy or download the cleaned HTML output.
+- Export detected HTML presentations to PowerPoint in Hybrid, Editable, or Exact image mode.
 - Preview desktop, tablet, and mobile widths.
 - Hide or show the source panel when you want a larger visual workspace.
 - Navigate detected slide decks with a bottom timeline and previous/next controls.
@@ -71,7 +72,7 @@ flowchart LR
   Preview --> Selection["Selected element details"]
   Selection --> Inspector
   Inspector --> Preview
-  Preview --> Export["Copy or download clean HTML"]
+  Preview --> Export["Copy or download clean HTML or PPTX"]
 ```
 
 The editing loop uses browser messages between the app shell and the iframe. Visual edits update the rendered document first, then the app cleans and stores the resulting HTML source.
@@ -123,6 +124,7 @@ flowchart TD
   Serialize --> Output{"Export target"}
   Output --> Copy["Clipboard"]
   Output --> Download["HTML file"]
+  Output --> Pptx["PowerPoint file"]
 ```
 
 ## Editing Workflow
@@ -138,7 +140,25 @@ flowchart TD
 5. For slide decks, use the timeline to move between slides, duplicate a slide, or insert a new slide.
 6. Use the Data panel to paste or edit CSV/TSV data, then insert it as a table into the active slide or page.
 7. Preview the result at desktop, tablet, and mobile widths.
-8. Copy or download the cleaned HTML.
+8. Copy or download the cleaned HTML, or export a detected presentation as PowerPoint.
+
+## PowerPoint Export
+
+Use the export menu next to **Save** to create `.pptx` files from the current HTML presentation:
+
+- **PowerPoint: Hybrid** keeps supported text, cards, simple shapes, tables, and images as editable PowerPoint objects, then rasterizes complex browser-only regions.
+- **PowerPoint: Editable** prioritizes native PowerPoint objects and reports unsupported regions that were skipped instead of flattened.
+- **PowerPoint: Exact image** captures every slide as one full-slide image for the closest visual match, with little object-level editability.
+
+Cosmic Canvas does not promise that arbitrary HTML can be both pixel-perfect and fully editable. Browser layout and PowerPoint drawing are different rendering systems. The export report lists slide count, editable object count, raster image count, skipped object count, and warnings such as unsupported filters, masks, blend modes, fixed positioning, unsafe links, and asset fetch failures.
+
+The durable stress fixture is:
+
+```text
+fixtures/pptx-export/cosmic-canvas-hairy-deck.html
+```
+
+It contains 14 self-contained slides with grids, transforms, gradients, shadows, tables, inline SVG, charts, a heatmap, a timeline, and overlapping elements.
 
 ## Keyboard Shortcuts
 
@@ -210,7 +230,20 @@ npm test
 
 Unit tests (Vitest + jsdom) cover the CSV parser/serializer and the HTML
 normalization, editor-bridge injection, script-inerting, and clean-export
-round-trips in `src/htmlDocument.ts`.
+round-trips in `src/htmlDocument.ts`. PPTX tests cover slide extraction,
+unsupported CSS reporting, raster fallback behavior, inline SVG fallback, and
+basic `.pptx` blob generation.
+
+The PowerPoint visual harness compares rendered HTML slides against rendered
+PPTX pages and writes PNG diffs under `tmp/pptx/fidelity/`.
+
+```powershell
+npm run pptx:fidelity -- --pptx output/pptx/cosmic-canvas-hairy-deck-prototype.pptx --threshold 0.15
+```
+
+The harness requires LibreOffice, Poppler's `pdftoppm`, and either a Playwright
+browser install or a local Chrome executable. Set `CHROME_PATH` if Chrome is not
+in a standard location.
 
 ## Editing Model
 
@@ -251,6 +284,7 @@ http://127.0.0.1:5173/?load=/stress-fixtures/large-scripted-100000.html&trusted=
 - Trusted-script mode executes pasted JavaScript inside the sandboxed preview. It is useful for your own generated HTML, but it should not be used for untrusted documents.
 - Runtime DOM changes made by a document's own scripts may affect what gets exported after visual edits.
 - Moving elements is designed for practical visual adjustments, not full responsive layout design.
+- PPTX export preserves common presentation structure, but unsupported CSS effects are approximated, rasterized, skipped, and reported depending on the selected mode.
 
 ## License
 

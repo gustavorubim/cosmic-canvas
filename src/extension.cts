@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Buffer } from "node:buffer";
 import { TextEncoder } from "node:util";
 import * as vscode from "vscode";
 
@@ -11,6 +12,7 @@ type WebviewMessage =
   | { type: "save"; html: string }
   | { type: "copy"; html: string }
   | { type: "download"; html: string }
+  | { type: "downloadBinary"; fileName: string; contentType: string; base64: string }
   | { type: "openFile" };
 
 export function activate(context: vscode.ExtensionContext) {
@@ -113,6 +115,10 @@ class CosmicCanvasEditorProvider implements vscode.CustomTextEditorProvider {
             await downloadCopy(message.html, document);
             await toast(webview, "HTML copy saved");
             break;
+          case "downloadBinary":
+            await downloadBinaryCopy(message, document);
+            await toast(webview, `${message.fileName} saved`);
+            break;
           case "openFile":
             await openHtmlFile();
             break;
@@ -200,6 +206,20 @@ async function downloadCopy(html: string, document: vscode.TextDocument) {
   });
   if (!uri) return;
   await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(html));
+}
+
+async function downloadBinaryCopy(
+  message: Extract<WebviewMessage, { type: "downloadBinary" }>,
+  document: vscode.TextDocument,
+) {
+  const safeName = path.basename(message.fileName || `${path.basename(document.fileName, path.extname(document.fileName))}.pptx`);
+  const extension = path.extname(safeName).replace(".", "").toLowerCase();
+  const uri = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.joinPath(vscode.Uri.file(path.dirname(document.fileName)), safeName),
+    filters: extension === "pptx" ? { PowerPoint: ["pptx"] } : undefined,
+  });
+  if (!uri) return;
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(message.base64, "base64"));
 }
 
 async function openHtmlFile() {

@@ -67,6 +67,7 @@
     "vscode:prepublish": "npm run build && npm run vscode:prune && npm run vscode:compile",
     "vsix": "npm run vscode:prepublish && vsce package --no-dependencies",
     "preview": "vite preview",
+    "pptx:fidelity": "node scripts/verify-pptx-fidelity.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "repair:native": "node scripts/repair-native-deps.mjs",
@@ -78,7 +79,9 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.34.1",
     "codemirror": "^6.0.1",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^0.468.0",
+    "pptxgenjs": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -90,6 +93,9 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.2.1",
     "jsdom": "^25.0.1",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
     "typescript": "^5.6.2",
     "vite": "^6.0.0",
     "vitest": "^4.1.8"

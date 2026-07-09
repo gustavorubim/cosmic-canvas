@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, Download, FileCode2, ListRestart, Save } from "lucide-react";
+import { ChevronDown, Copy, Download, FileCode2, FileStack, ListRestart, Save } from "lucide-react";
 import { type ChangeEvent, type RefObject, useEffect, useRef, useState } from "react";
 
 type TopbarProps = {
@@ -11,6 +11,9 @@ type TopbarProps = {
   onDownload: () => void;
   onDownloadSelfContained: () => void;
   onDownloadPrint: () => void;
+  onDownloadPowerPointHybrid: () => void;
+  onDownloadPowerPointEditable: () => void;
+  onDownloadPowerPointImage: () => void;
   onNormalize: () => void;
 };
 
@@ -24,6 +27,9 @@ export function Topbar({
   onDownload,
   onDownloadSelfContained,
   onDownloadPrint,
+  onDownloadPowerPointHybrid,
+  onDownloadPowerPointEditable,
+  onDownloadPowerPointImage,
   onNormalize,
 }: TopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -119,6 +125,39 @@ export function Topbar({
               >
                 <Download size={15} aria-hidden="true" />
                 Print HTML
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDownloadPowerPointHybrid();
+                }}
+              >
+                <FileStack size={15} aria-hidden="true" />
+                PowerPoint: Hybrid
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDownloadPowerPointEditable();
+                }}
+              >
+                <FileStack size={15} aria-hidden="true" />
+                PowerPoint: Editable
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDownloadPowerPointImage();
+                }}
+              >
+                <FileStack size={15} aria-hidden="true" />
+                PowerPoint: Exact image
               </button>
               <button
                 role="menuitem"
