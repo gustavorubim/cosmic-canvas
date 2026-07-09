@@ -3,6 +3,8 @@ import {
   SAMPLE_HTML,
   normalizeHtmlInput,
   cleanEditorHtml,
+  createPrintHtml,
+  createSelfContainedHtml,
   prepareEditableHtml,
 } from "./htmlDocument";
 
@@ -115,5 +117,39 @@ describe("cleanEditorHtml pretty", () => {
     expect(pretty.split("\n").length).toBeGreaterThan(plain.split("\n").length);
     expect(pretty).toContain("42%");
     expect(pretty).not.toContain("data-wysiwyg-");
+  });
+});
+
+describe("export variants", () => {
+  it("inlines fetchable image URLs as data URIs", async () => {
+    const input = '<main><img src="https://example.com/image.png" alt="demo" /></main>';
+    const result = await createSelfContainedHtml(input, async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      }),
+    );
+
+    expect(result.failures).toEqual([]);
+    expect(result.html).toContain('src="data:image/png;base64,AQID"');
+  });
+
+  it("reports image URLs that cannot be inlined", async () => {
+    const result = await createSelfContainedHtml('<img src="https://example.com/missing.png" />', async () =>
+      new Response("", { status: 404 }),
+    );
+
+    expect(result.failures).toEqual(["https://example.com/missing.png"]);
+    expect(result.html).toContain('src="https://example.com/missing.png"');
+  });
+
+  it("adds print page-break rules without changing default clean export", () => {
+    const baseline = cleanEditorHtml(SAMPLE_HTML);
+    const printable = createPrintHtml('<section class="slide"><h1>One</h1></section>');
+
+    expect(cleanEditorHtml(SAMPLE_HTML)).toBe(baseline);
+    expect(printable).toContain("data-cosmic-print-export");
+    expect(printable).toContain("page-break-after: always");
+    expect(printable).toContain("break-after: page");
   });
 });

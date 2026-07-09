@@ -491,6 +491,46 @@ export type CleanOptions = {
   pretty?: boolean;
 };
 
+type FetchLike = (input: RequestInfo | URL) => Promise<Response>;
+
+const PRINT_EXPORT_STYLE = `
+@media print {
+  body {
+    margin: 0;
+    background: #ffffff !important;
+  }
+
+  section.slide,
+  article.slide,
+  section[data-title],
+  section[data-section],
+  [data-slide],
+  [data-slide-id],
+  .reveal .slides > section,
+  .reveal .slides > section > section {
+    min-height: 100vh;
+    page-break-after: always;
+    break-after: page;
+    box-shadow: none !important;
+  }
+
+  section.slide:last-child,
+  article.slide:last-child,
+  section[data-title]:last-child,
+  section[data-section]:last-child,
+  [data-slide]:last-child,
+  [data-slide-id]:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}
+
+@page {
+  size: landscape;
+  margin: 0;
+}
+`;
+
 export function cleanEditorHtml(html: string, options: CleanOptions = {}): string {
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
@@ -499,6 +539,56 @@ export function cleanEditorHtml(html: string, options: CleanOptions = {}): strin
   restoreInlineHandlers(doc);
   sweepEditorAttributes(doc);
   if (options.pretty) return prettyPrintDocument(doc);
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+export async function createSelfContainedHtml(
+  html: string,
+  fetcher: FetchLike = fetch,
+  baseUrl = typeof window === "undefined" ? "http://localhost/" : window.location.href,
+) {
+  const doc = parseDocument(cleanEditorHtml(html));
+  const failures: string[] = [];
+  const images = Array.from(doc.querySelectorAll("img[src]"));
+
+  for (const image of images) {
+    const src = image.getAttribute("src") || "";
+    if (!src || src.startsWith("data:")) continue;
+    try {
+      const url = new URL(src, baseUrl).toString();
+      const response = await fetcher(url);
+      if (!response.ok) throw new Error(String(response.status));
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      const data = arrayBufferToBase64(await response.arrayBuffer());
+      image.setAttribute("src", `data:${contentType};base64,${data}`);
+    } catch {
+      failures.push(src);
+    }
+  }
+
+  return {
+    html: `<!doctype html>\n${doc.documentElement.outerHTML}`,
+    failures,
+  };
+}
+
+export function createPrintHtml(html: string) {
+  const doc = parseDocument(cleanEditorHtml(html));
+  ensureDocumentShape(doc);
+  const style = doc.createElement("style");
+  style.setAttribute("data-cosmic-print-export", "true");
+  style.textContent = PRINT_EXPORT_STYLE;
+  doc.head.append(style);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 

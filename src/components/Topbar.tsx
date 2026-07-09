@@ -9,6 +9,8 @@ type TopbarProps = {
   saveTitle: string;
   onCopy: () => void;
   onDownload: () => void;
+  onDownloadSelfContained: () => void;
+  onDownloadPrint: () => void;
 };
 
 export function Topbar({
@@ -19,6 +21,8 @@ export function Topbar({
   saveTitle,
   onCopy,
   onDownload,
+  onDownloadSelfContained,
+  onDownloadPrint,
 }: TopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -91,6 +95,28 @@ export function Topbar({
               >
                 <Download size={15} aria-hidden="true" />
                 Download copy
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDownloadSelfContained();
+                }}
+              >
+                <Download size={15} aria-hidden="true" />
+                Self-contained
+              </button>
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDownloadPrint();
+                }}
+              >
+                <Download size={15} aria-hidden="true" />
+                Print HTML
               </button>
             </div>
           ) : null}

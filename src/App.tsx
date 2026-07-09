@@ -13,7 +13,14 @@ import {
   parseDataText,
   serializeDataRows,
 } from "./csv";
-import { cleanEditorHtml, normalizeHtmlInput, prepareEditableHtml, SAMPLE_HTML } from "./htmlDocument";
+import {
+  cleanEditorHtml,
+  createPrintHtml,
+  createSelfContainedHtml,
+  normalizeHtmlInput,
+  prepareEditableHtml,
+  SAMPLE_HTML,
+} from "./htmlDocument";
 import {
   type DeckSlide,
   type EditorMode,
@@ -412,12 +419,12 @@ export default function App() {
     event.currentTarget.value = "";
   }
 
-  function downloadCleanHtml(clean: string) {
+  function downloadCleanHtml(clean: string, suffix = "") {
     const blob = new Blob([clean], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = fileNameFromDate();
+    anchor.download = suffix ? fileNameFromDate().replace(/\.html$/, `-${suffix}.html`) : fileNameFromDate();
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -474,6 +481,30 @@ export default function App() {
 
     downloadCleanHtml(clean);
     showToast("Downloaded HTML copy");
+  }
+
+  async function downloadSelfContainedHtml() {
+    const result = await createSelfContainedHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "download", html: result.html });
+    } else {
+      downloadCleanHtml(result.html, "self-contained");
+    }
+    showToast(
+      result.failures.length
+        ? `Downloaded with ${result.failures.length} image${result.failures.length === 1 ? "" : "s"} still external`
+        : "Downloaded self-contained HTML",
+    );
+  }
+
+  function downloadPrintHtml() {
+    const printable = createPrintHtml(sourceHtmlRef.current);
+    if (vscodeApi) {
+      vscodeApi.postMessage({ type: "download", html: printable });
+      return;
+    }
+    downloadCleanHtml(printable, "print");
+    showToast("Downloaded print HTML");
   }
 
   function restoreDraft() {
@@ -709,6 +740,8 @@ export default function App() {
         saveTitle={saveTitle}
         onCopy={copyHtml}
         onDownload={downloadHtml}
+        onDownloadSelfContained={() => void downloadSelfContainedHtml()}
+        onDownloadPrint={downloadPrintHtml}
       />
 
       <Toolbar
