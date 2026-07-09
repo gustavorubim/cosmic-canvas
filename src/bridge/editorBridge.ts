@@ -241,6 +241,55 @@ export function styleLooksPaged(element: Element) {
   );
 }
 
+export function computedStyleLooksPaged(element: Element) {
+  const view = element.ownerDocument.defaultView;
+  if (!view) return false;
+  try {
+    const style = view.getComputedStyle(element);
+    const width = parseFloat(style.width || "");
+    const height = parseFloat(style.height || "");
+    if (Number.isFinite(width) && Number.isFinite(height) && width >= 300 && height >= 180) return true;
+    return /^(?:100|9\d|8\d)vh$/.test(style.height || "") || /^(?:100|9\d|8\d)vw$/.test(style.width || "");
+  } catch {
+    return false;
+  }
+}
+
+export function forcedVisualSignal(element: Element) {
+  if (element.querySelector("img, svg, canvas, table, video, picture")) return true;
+  const style = (element.getAttribute("style") || "").toLowerCase();
+  if (/(background|background-image)\s*:\s*(?!none)(?:[^;]*url\(|[^;]*(?:#|rgb|hsl|linear-gradient|radial-gradient))/i.test(style)) {
+    return true;
+  }
+  if (/(border|box-shadow|filter|object-fit|overflow)\s*:|position\s*:\s*(absolute|fixed)|inset\s*:/i.test(style)) {
+    return true;
+  }
+
+  const view = element.ownerDocument.defaultView;
+  if (!view) return false;
+  try {
+    const computed = view.getComputedStyle(element);
+    return (
+      (computed.backgroundImage && computed.backgroundImage !== "none") ||
+      (computed.backgroundColor && !["", "transparent", "rgba(0, 0, 0, 0)"].includes(computed.backgroundColor)) ||
+      (computed.borderStyle && computed.borderStyle !== "none") ||
+      computed.position === "absolute" ||
+      computed.position === "fixed"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function forcedTitleSignal(element: Element) {
+  if (element.getAttribute("data-title") || element.getAttribute("aria-label")) return true;
+  return Boolean(
+    element.querySelector(
+      "h1, h2, h3, h4, h5, h6, [role='heading'], [data-title], [aria-label], [class*='title'], [class*='headline'], [class*='heading']",
+    ),
+  );
+}
+
 export function structuralSlideScore(element: Element, parent: Element | null) {
   if ((element as HTMLElement).dataset?.wysiwygEditor === "true") return -Infinity;
   if (element.closest('[data-wysiwyg-editor="true"]')) return -Infinity;
@@ -336,7 +385,13 @@ export function meaningfulForcedSlideElement(element: Element) {
     return false;
   }
   const text = (element.textContent || "").replace(/\s+/g, " ").trim();
-  return text.length >= 12 || Boolean(element.querySelector("img, svg, canvas, table, video"));
+  return (
+    text.length >= 6 ||
+    forcedVisualSignal(element) ||
+    forcedTitleSignal(element) ||
+    styleLooksPaged(element) ||
+    computedStyleLooksPaged(element)
+  );
 }
 
 export function forcedSlideScore(element: Element, parent: Element | null) {
@@ -345,7 +400,10 @@ export function forcedSlideScore(element: Element, parent: Element | null) {
   let score = Number.isFinite(baseScore) ? Math.max(0, baseScore) : 0;
   if (hasDeckContainerHint(parent)) score += 2;
   if (hasSlideItemHint(element)) score += 2;
-  if (element.querySelector("h1, h2, h3, [role='heading']")) score += 2;
+  if (styleLooksPaged(element) || computedStyleLooksPaged(element)) score += 3;
+  if (forcedVisualSignal(element)) score += 2;
+  if (forcedTitleSignal(element)) score += 2;
+  if (/(\bslide\b|\bpage\b|\bscreen\b|\bframe\b)\s*\d+(\s*(of|\/)\s*\d+)?/i.test(element.textContent || "")) score += 2;
   if (element.children.length > 0) score += 1;
   if ((element.textContent || "").replace(/\s+/g, " ").trim().length >= 60) score += 1;
   return score;
@@ -369,6 +427,14 @@ export function inferForcedDeckSlides(root: ParentNode) {
     if ((container as Node).nodeType !== 1) continue;
     const containerElement = container as Element;
     if (hasNonSlideChromeHint(containerElement)) continue;
+    if (
+      containerElement !== searchRoot &&
+      !hasDeckContainerHint(containerElement) &&
+      (hasSlideItemHint(containerElement) || styleLooksPaged(containerElement) || computedStyleLooksPaged(containerElement)) &&
+      forcedSlideScore(containerElement, containerElement.parentElement) >= 6
+    ) {
+      continue;
+    }
     const children = Array.from(containerElement.children).filter(meaningfulForcedSlideElement);
     if (children.length < 2 || children.length > 120) continue;
 
@@ -381,10 +447,19 @@ export function inferForcedDeckSlides(root: ParentNode) {
     const repeated = hasRepeatedSiblingShape(candidates);
     const parentHint = hasDeckContainerHint(containerElement);
     const itemHints = candidates.filter((candidate) => hasSlideItemHint(candidate)).length;
+    const visualHints = candidates.filter((candidate) => forcedVisualSignal(candidate)).length;
+    const pagedHints = candidates.filter((candidate) => styleLooksPaged(candidate) || computedStyleLooksPaged(candidate)).length;
     if (!parentHint && !repeated && itemHints < 2 && scored.length < 3) continue;
 
     const average = scored.reduce((total, item) => total + item.score, 0) / scored.length;
-    const groupScore = candidates.length * 10 + average + (parentHint ? 8 : 0) + (repeated ? 6 : 0) + itemHints;
+    const groupScore =
+      candidates.length * 8 +
+      average +
+      (parentHint ? 10 : 0) +
+      (repeated ? 8 : 0) +
+      itemHints * 2 +
+      visualHints +
+      pagedHints * 2;
     if (!best || groupScore > best.score) {
       best = { slides: candidates, score: groupScore };
     }
@@ -419,10 +494,13 @@ export function collectDeckSlides(root: ParentNode, options: { force?: boolean }
     inferStructuralDeckSlides(root).forEach(addSlide);
   }
 
-  if (options.force && slides.length <= 1) {
-    slides.length = 0;
-    seen.clear();
-    inferForcedDeckSlides(root).forEach(addSlide);
+  if (options.force) {
+    const forcedSlides = inferForcedDeckSlides(root);
+    if (forcedSlides.length && (slides.length <= 1 || forcedSlides.length > slides.length)) {
+      slides.length = 0;
+      seen.clear();
+      forcedSlides.forEach(addSlide);
+    }
   }
 
   return slides

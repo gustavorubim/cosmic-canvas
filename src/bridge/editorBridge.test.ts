@@ -277,6 +277,49 @@ describe("bridge helpers", () => {
       "Closeout Actions",
     ]);
   });
+
+  it("force mode infers visual page siblings with little or no text", () => {
+    const { win } = createWindow(`
+      <main id="deck-canvas">
+        <div id="visual-a" aria-label="Opening visual" class="plate-a" style="width: 1280px; height: 720px; background-image: url(opening.png);"></div>
+        <div id="visual-b" aria-label="Risk visual" class="plate-b" style="width: 1280px; height: 720px; background: linear-gradient(#123, #456);"></div>
+        <div id="visual-c" aria-label="Closeout visual" class="plate-c" style="width: 1280px; height: 720px; background-color: #f8fafc; border: 1px solid #94a3b8;"></div>
+      </main>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.id)).toEqual([
+      "visual-a",
+      "visual-b",
+      "visual-c",
+    ]);
+  });
+
+  it("force mode infers page-like frames with styled title spans", () => {
+    const { win } = createWindow(`
+      <section class="storyboard">
+        <div id="frame-a" class="frame-01" style="aspect-ratio: 16 / 9; border: 1px solid #111;">
+          <span class="headline-text">Opening</span>
+          <span class="metric-value">42%</span>
+        </div>
+        <div id="frame-b" class="frame-02" style="aspect-ratio: 16 / 9; border: 1px solid #111;">
+          <span class="headline-text">Control</span>
+          <span class="metric-value">17</span>
+        </div>
+        <div id="frame-c" class="frame-03" style="aspect-ratio: 16 / 9; border: 1px solid #111;">
+          <span class="headline-text">Closeout</span>
+          <span class="metric-value">5</span>
+        </div>
+      </section>
+    `);
+
+    expect(collectDeckSlides(win.document)).toEqual([]);
+    expect(collectDeckSlides(win.document, { force: true }).map((slide) => slide.id)).toEqual([
+      "frame-a",
+      "frame-b",
+      "frame-c",
+    ]);
+  });
 });
 
 describe("editor bridge extraction", () => {
@@ -760,6 +803,28 @@ describe("deck detection", () => {
       "Opening Position",
       "Regulatory Lineage",
       "Closeout Actions",
+    ]);
+  });
+
+  it("republishes visual inferred slides when force timeline is enabled", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><body><main id="deck-canvas">
+        <div id="visual-a" aria-label="Opening visual" class="plate-a" style="width: 1280px; height: 720px; background-image: url(opening.png);"></div>
+        <div id="visual-b" aria-label="Risk visual" class="plate-b" style="width: 1280px; height: 720px; background: linear-gradient(#123, #456);"></div>
+        <div id="visual-c" aria-label="Closeout visual" class="plate-c" style="width: 1280px; height: 720px; background-color: #f8fafc; border: 1px solid #94a3b8;"></div>
+      </main></body></html>
+    `);
+    installKeyboardFence(win);
+    installEditorBridge(win);
+
+    expect(latestDeckMessage(messages).slides).toEqual([]);
+
+    postCommand(win, { command: "set-force-timeline", enabled: true });
+
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Opening visual",
+      "Risk visual",
+      "Closeout visual",
     ]);
   });
 });
