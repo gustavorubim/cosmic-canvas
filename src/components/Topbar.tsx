@@ -2,6 +2,7 @@ import { ChevronDown, Copy, Download, FileCode2, FileStack, ListRestart, Save } 
 import { type ChangeEvent, type RefObject, useEffect, useRef, useState } from "react";
 
 type TopbarProps = {
+  version: string;
   fileInputRef: RefObject<HTMLInputElement>;
   onOpen: () => void;
   onOpenFile: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -18,6 +19,7 @@ type TopbarProps = {
 };
 
 export function Topbar({
+  version,
   fileInputRef,
   onOpen,
   onOpenFile,
@@ -52,7 +54,10 @@ export function Topbar({
         <div className="brand-mark">
           <img alt="" src="app-icon-space-192.png" />
         </div>
-        <h1>Cosmic Canvas</h1>
+        <div className="brand-title">
+          <h1>Cosmic Canvas</h1>
+          <span className="version-badge">v{version}</span>
+        </div>
       </div>
       <div className="topbar-actions">
         <input

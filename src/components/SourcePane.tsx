@@ -1,13 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { PanelLeftOpen } from "lucide-react";
 import { basicSetup } from "codemirror";
 import { html } from "@codemirror/lang-html";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Annotation, EditorState, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { type SelectedElement } from "../protocol";
-import { findOpeningTagLocation, sourceNeedleForSelected } from "../sourceSync";
+import { resolveOpeningTagLocation, sourceNeedleForSelected } from "../sourceSync";
 
 const setFlashLine = StateEffect.define<number | null>();
+const externalSourceUpdate = Annotation.define<boolean>();
 
 const flashLineField = StateField.define<DecorationSet>({
   create() {
@@ -36,12 +37,17 @@ export type SourcePaneProps = {
   dirty: boolean;
   onApply: () => void;
   selected: SelectedElement | null;
+  incrementalEdit?: { revision: number; from: number; to: number; text: string } | null;
 };
 
-export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, selected }: SourcePaneProps) {
+export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, selected, incrementalEdit }: SourcePaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const flashTimerRef = useRef<number>();
+  const sourceLocationResult = useMemo(
+    () => resolveOpeningTagLocation(value, selected),
+    [value, selected?.id, selected?.domId, selected?.tagName, selected?.classes.join(" "), selected?.sourcePath?.join(".")],
+  );
 
   // Keep a ref to the latest onChange so the updateListener always calls the
   // current callback without needing to recreate the editor.
@@ -69,6 +75,7 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, s
         flashLineField,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
+            if (update.transactions.some((transaction) => transaction.annotation(externalSourceUpdate))) return;
             onChangeRef.current(update.state.doc.toString());
           }
         }),
@@ -88,6 +95,20 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, s
     };
   }, [visible]);
 
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !incrementalEdit) return;
+    if (incrementalEdit.from < 0 || incrementalEdit.to > view.state.doc.length) return;
+    view.dispatch({
+      changes: {
+        from: incrementalEdit.from,
+        to: incrementalEdit.to,
+        insert: incrementalEdit.text,
+      },
+      annotations: externalSourceUpdate.of(true),
+    });
+  }, [incrementalEdit?.revision]);
+
   // Reflect external value changes into the editor without clobbering the cursor.
   useEffect(() => {
     const view = viewRef.current;
@@ -97,13 +118,14 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, s
     if (view.state.doc.toString() !== value) {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: value },
+        annotations: externalSourceUpdate.of(true),
       });
     }
   }, [value]);
 
   useEffect(() => {
     const view = viewRef.current;
-    const location = findOpeningTagLocation(value, selected);
+    const location = sourceLocationResult.location;
     if (!view || !location) return;
 
     const line = view.state.doc.line(location.lineNumber);
@@ -119,7 +141,10 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, s
     flashTimerRef.current = window.setTimeout(() => {
       viewRef.current?.dispatch({ effects: setFlashLine.of(null) });
     }, 1000);
-  }, [selected?.id, selected?.domId, selected?.tagName, selected?.classes.join(" "), visible]);
+  }, [
+    sourceLocationResult,
+    visible,
+  ]);
 
   if (!visible) {
     return (
@@ -139,7 +164,19 @@ export function SourcePane({ value, onChange, visible, onShow, dirty, onApply, s
       <div className="pane-title">
         <span>HTML source</span>
         <span className="source-meta">
-          {selected ? <small title={sourceNeedleForSelected(selected)}>Synced</small> : null}
+          {selected && sourceLocationResult.status === "matched" ? (
+            <small title={sourceNeedleForSelected(selected)}>Synced</small>
+          ) : null}
+          {selected && sourceLocationResult.status !== "matched" ? (
+            <small
+              className="source-sync-warning"
+              title={sourceLocationResult.status === "ambiguous"
+                ? `${sourceLocationResult.candidates} source tags match this selection`
+                : "The selected element no longer has a reliable source location"}
+            >
+              Source match unavailable
+            </small>
+          ) : null}
           {dirty ? (
             <button
               className="apply-chip"

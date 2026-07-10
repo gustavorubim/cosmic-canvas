@@ -1,10 +1,10 @@
 import {
   Eye,
   Film,
+  ListTree,
   Monitor,
   MousePointer2,
   Move,
-  PanelBottom,
   PanelLeftClose,
   PanelLeftOpen,
   Redo2,
@@ -133,15 +133,15 @@ export function Toolbar({
 
       <label
         className={`script-toggle ${forceTimeline ? "is-on" : ""}`}
-        title="Force the bottom timeline to infer slides from repeated page-like content."
+        title="Force the Pages navigator to infer pages from repeated page-like content."
       >
         <input
           checked={forceTimeline}
           onChange={(event) => onToggleForceTimeline(event.target.checked)}
           type="checkbox"
         />
-        <PanelBottom size={16} aria-hidden="true" />
-        Force timeline
+        <ListTree size={16} aria-hidden="true" />
+        Force pages
       </label>
 
       <div className="icon-group" aria-label="History">
