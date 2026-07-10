@@ -7,6 +7,11 @@ export type SourceLocation = {
   tag: string;
 };
 
+export type SourceLocationResult =
+  | { status: "matched"; location: SourceLocation }
+  | { status: "ambiguous"; location: null; candidates: number }
+  | { status: "not-found"; location: null; candidates: 0 };
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -39,12 +44,25 @@ export function sourceNeedleForSelected(selected: SelectedElement | null) {
   return `<${selected.tagName}${details}`;
 }
 
-export function findOpeningTagLocation(source: string, selected: SelectedElement | null): SourceLocation | null {
-  if (!selected) return null;
+export function resolveOpeningTagLocation(source: string, selected: SelectedElement | null): SourceLocationResult {
+  if (!selected) return { status: "not-found", location: null, candidates: 0 };
   const tag = selected.tagName.toLowerCase();
   const pattern = new RegExp(`<${escapeRegExp(tag)}\\b[^>]*>`, "gi");
-  let fallback: SourceLocation | null = null;
+  let structuralOrdinal = -1;
+  if (selected.sourcePath?.length) {
+    const doc = new DOMParser().parseFromString(source, "text/html");
+    let element: Element | null = doc.documentElement;
+    for (const index of selected.sourcePath) {
+      element = element?.children[index] || null;
+      if (!element) break;
+    }
+    if (element?.tagName.toLowerCase() === tag) {
+      structuralOrdinal = Array.from(doc.querySelectorAll(tag)).indexOf(element);
+    }
+  }
+  const matchingLocations: SourceLocation[] = [];
   let match: RegExpExecArray | null;
+  let ordinal = 0;
 
   while ((match = pattern.exec(source))) {
     const openingTag = match[0];
@@ -55,9 +73,23 @@ export function findOpeningTagLocation(source: string, selected: SelectedElement
       tag,
     };
 
-    if (!fallback) fallback = location;
-    if (openingTagMatches(openingTag, selected)) return location;
+    if (structuralOrdinal >= 0) {
+      if (ordinal === structuralOrdinal) return { status: "matched", location };
+    } else if (openingTagMatches(openingTag, selected)) {
+      matchingLocations.push(location);
+    }
+    ordinal += 1;
   }
 
-  return fallback;
+  if (structuralOrdinal >= 0 || matchingLocations.length === 0) {
+    return { status: "not-found", location: null, candidates: 0 };
+  }
+  if (matchingLocations.length > 1) {
+    return { status: "ambiguous", location: null, candidates: matchingLocations.length };
+  }
+  return { status: "matched", location: matchingLocations[0] };
+}
+
+export function findOpeningTagLocation(source: string, selected: SelectedElement | null): SourceLocation | null {
+  return resolveOpeningTagLocation(source, selected).location;
 }

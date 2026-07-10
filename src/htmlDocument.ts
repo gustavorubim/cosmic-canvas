@@ -1,6 +1,8 @@
 import {
   canDirectlyEditTextElement,
   collectDeckSlides,
+  classifyBridgeMutation,
+  combineMutationImpacts,
   deckSlideSelector,
   editableTextTarget,
   elementDescriptorText,
@@ -32,6 +34,7 @@ import {
   structuralSlideScore,
   styleLooksPaged,
 } from "./bridge/editorBridge";
+import { isBridgeCommand } from "./bridgeCommandValidation";
 
 const NONE = "__wysiwyg_none__";
 
@@ -162,6 +165,18 @@ const EDITOR_STYLE = `
   [data-wysiwyg-editing="true"] {
     outline: 3px solid #0ea5e9 !important;
     outline-offset: 4px !important;
+  }
+
+  [data-wysiwyg-editor-hidden="true"] {
+    visibility: hidden !important;
+  }
+
+  [data-wysiwyg-editor-locked="true"] {
+    cursor: not-allowed !important;
+  }
+
+  [data-wysiwyg-editor-pick-through="true"] {
+    pointer-events: none !important;
   }
 
   [contenteditable="true"] {
@@ -356,7 +371,36 @@ function restoreInlineHandlers(doc: Document) {
   });
 }
 
-function removeEditorArtifacts(doc: Document) {
+function removeEditorArtifacts(doc: Document, preserveHydratedModules = false) {
+  if (!preserveHydratedModules) {
+    doc.querySelectorAll("[data-wysiwyg-original-resources]").forEach((element) => {
+      const raw = element.getAttribute("data-wysiwyg-original-resources") || "{}";
+      try {
+        const values = JSON.parse(raw) as Record<string, string>;
+        Object.entries(values).forEach(([attribute, value]) => {
+          if (attribute === "__text") element.textContent = value;
+          else element.setAttribute(attribute, value);
+        });
+      } catch {
+        // Never preserve malformed editor metadata in clean output.
+      }
+      element.removeAttribute("data-wysiwyg-original-resources");
+    });
+    doc.querySelectorAll("[data-wysiwyg-original-resource-attr]").forEach((element) => {
+      const attribute = element.getAttribute("data-wysiwyg-original-resource-attr") || "";
+      const value = element.getAttribute("data-wysiwyg-original-resource-value") || "";
+      if (attribute) element.setAttribute(attribute, value);
+      element.removeAttribute("data-wysiwyg-original-resource-attr");
+      element.removeAttribute("data-wysiwyg-original-resource-value");
+    });
+    doc.querySelectorAll("script[data-wysiwyg-original-module-src]").forEach((script) => {
+      script.setAttribute("src", script.getAttribute("data-wysiwyg-original-module-src") || "");
+      script.textContent = "";
+      script.setAttribute("type", script.getAttribute("data-wysiwyg-original-module-type") || "module");
+      script.removeAttribute("data-wysiwyg-original-module-src");
+      script.removeAttribute("data-wysiwyg-original-module-type");
+    });
+  }
   doc.querySelectorAll("mark[data-wysiwyg-find]").forEach((mark) => {
     const parent = mark.parentNode;
     if (!parent) return;
@@ -523,28 +567,57 @@ function bridgeHelperSource() {
     forcedSlidesShouldReplaceExisting.toString(),
     inferForcedDeckSlides.toString(),
     collectDeckSlides.toString(),
+    classifyBridgeMutation.toString(),
+    combineMutationImpacts.toString(),
+    isBridgeCommand.toString(),
   ].join("\n");
+}
+
+function makeDocumentCspInert(doc: Document) {
+  doc.querySelectorAll("meta[http-equiv]").forEach((meta) => {
+    if ((meta.getAttribute("http-equiv") || "").toLowerCase() !== "content-security-policy") return;
+    meta.setAttribute("data-wysiwyg-original-http-equiv", meta.getAttribute("http-equiv") || "Content-Security-Policy");
+    meta.removeAttribute("http-equiv");
+  });
+}
+
+function restoreDocumentCsp(doc: Document) {
+  doc.querySelectorAll("meta[data-wysiwyg-original-http-equiv]").forEach((meta) => {
+    meta.setAttribute(
+      "http-equiv",
+      meta.getAttribute("data-wysiwyg-original-http-equiv") || "Content-Security-Policy",
+    );
+    meta.removeAttribute("data-wysiwyg-original-http-equiv");
+  });
+}
+
+function installPreviewBase(doc: Document, baseUrl: string) {
+  if (!baseUrl || doc.querySelector("base[href]:not([data-wysiwyg-editor='true'])")) return;
+  const base = doc.createElement("base");
+  base.dataset.wysiwygEditor = "true";
+  base.href = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  doc.head.prepend(base);
 }
 
 function deckSlideSelectorListSource() {
   return `function deckSlideSelectorList() { return ${JSON.stringify(deckSlideSelector().split(", "))}; }`;
 }
 
-function keyboardFenceScriptTag() {
-  const source = `(() => {\n${bridgeHelperSource()}\n(${scriptSource(installKeyboardFence)})(window);\n})();`;
+function keyboardFenceScriptTag(sessionToken: string) {
+  const source = `(() => {\nparent.postMessage({type:"wysiwyg-probe",sessionToken:${JSON.stringify(sessionToken)}}, "*");\n${bridgeHelperSource()}\ntry { (${scriptSource(installKeyboardFence)})(window, ${JSON.stringify(sessionToken)}); } catch (error) { parent.postMessage({type:"wysiwyg-bridge-error",sessionToken:${JSON.stringify(sessionToken)},message:String(error && error.message || error)}, "*"); }\n})();`;
   return `<script data-wysiwyg-editor="true">${source}</script>`;
 }
 
-function editorScriptTag() {
-  const source = `(() => {\n${bridgeHelperSource()}\n(${scriptSource(installEditorBridge)})(window);\n})();`;
+function editorScriptTag(sessionToken: string) {
+  const source = `(() => {\n${bridgeHelperSource()}\ntry { (${scriptSource(installEditorBridge)})(window, ${JSON.stringify(sessionToken)}); } catch (error) { parent.postMessage({type:"wysiwyg-bridge-error",sessionToken:${JSON.stringify(sessionToken)},message:String(error && error.message || error)}, "*"); }\n})();`;
   return `<script data-wysiwyg-editor="true">${source}</script>`;
 }
 
-function injectEditorBridge(html: string): string {
+function injectEditorBridge(html: string, sessionToken: string): string {
   let nextHtml = normalizeHtmlInput(html);
-  const fence = keyboardFenceScriptTag();
+  const fence = keyboardFenceScriptTag(sessionToken);
   const style = editorStyleTag();
-  const script = editorScriptTag();
+  const script = editorScriptTag(sessionToken);
 
   if (/<head(?:\s[^>]*)?>/i.test(nextHtml)) {
     nextHtml = nextHtml.replace(/<head(?:\s[^>]*)?>/i, (match) => `${match}${fence}`);
@@ -576,6 +649,35 @@ export type CleanOptions = {
 };
 
 type FetchLike = (input: RequestInfo | URL) => Promise<Response>;
+
+export async function inlineTrustedModuleEntrypoints(
+  html: string,
+  baseUrl: string,
+  fetcher: FetchLike = fetch,
+) {
+  if (!baseUrl) return html;
+  const doc = parseDocument(html);
+  const scripts = Array.from(doc.querySelectorAll('script[type="module"][src]'));
+  await Promise.all(scripts.map(async (script) => {
+    const src = script.getAttribute("src") || "";
+    try {
+      const resolved = new URL(src, baseUrl);
+      const response = await fetcher(resolved);
+      if (!response.ok) return;
+      const source = await response.text();
+      script.textContent = source;
+      script.setAttribute("data-wysiwyg-original-module-type", script.getAttribute("type") || "module");
+      if (!/(?:^|[;\n])\s*(?:import|export)\b|\bimport\s*\(/m.test(source)) {
+        script.setAttribute("type", "text/javascript");
+      }
+      script.setAttribute("data-wysiwyg-original-module-src", src);
+      script.removeAttribute("src");
+    } catch {
+      // Runtime resource diagnostics will explain an entrypoint that remains unavailable.
+    }
+  }));
+  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+}
 
 const PRINT_SLIDE_SELECTOR = deckSlideSelector();
 const PRINT_LAST_SLIDE_SELECTOR = PRINT_SLIDE_SELECTOR.split(", ")
@@ -684,6 +786,7 @@ export function cleanEditorHtml(html: string, options: CleanOptions = {}): strin
   removeEditorArtifacts(doc);
   restoreUserScripts(doc);
   restoreInlineHandlers(doc);
+  restoreDocumentCsp(doc);
   sweepEditorAttributes(doc);
   if (options.pretty) return prettyPrintDocument(doc);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
@@ -748,31 +851,22 @@ export function normalizeDeckHtml(html: string) {
   return prettyPrintDocument(doc);
 }
 
-export function prepareEditableHtml(html: string, runTrustedScripts = false): string {
+export function prepareEditableHtml(html: string, runTrustedScripts = false, baseUrl = "", sessionToken = ""): string {
   if (runTrustedScripts) {
-    return injectEditorBridge(html);
+    const trustedDoc = parseDocument(html);
+    ensureDocumentShape(trustedDoc);
+    removeEditorArtifacts(trustedDoc, true);
+    makeDocumentCspInert(trustedDoc);
+    installPreviewBase(trustedDoc, baseUrl);
+    return injectEditorBridge(`<!doctype html>\n${trustedDoc.documentElement.outerHTML}`, sessionToken);
   }
 
   const doc = parseDocument(html);
   ensureDocumentShape(doc);
-  removeEditorArtifacts(doc);
+  removeEditorArtifacts(doc, true);
+  makeDocumentCspInert(doc);
   makeUserScriptsInert(doc);
   makeInlineHandlersInert(doc);
-
-  const fenceScript = doc.createElement("script");
-  fenceScript.dataset.wysiwygEditor = "true";
-  fenceScript.textContent = `(() => {\n${bridgeHelperSource()}\n(${scriptSource(installKeyboardFence)})(window);\n})();`;
-  doc.head.prepend(fenceScript);
-
-  const style = doc.createElement("style");
-  style.dataset.wysiwygEditor = "true";
-  style.textContent = EDITOR_STYLE;
-  doc.head.append(style);
-
-  const script = doc.createElement("script");
-  script.dataset.wysiwygEditor = "true";
-  script.textContent = `(() => {\n${bridgeHelperSource()}\n(${scriptSource(installEditorBridge)})(window);\n})();`;
-  doc.body.append(script);
-
-  return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+  installPreviewBase(doc, baseUrl);
+  return injectEditorBridge(`<!doctype html>\n${doc.documentElement.outerHTML}`, sessionToken);
 }

@@ -1,5 +1,5 @@
 import { JSDOM } from "jsdom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HOSTILE_DECK_HTML, installHostileDeckNavigation, REVEAL_DECK_HTML } from "../fixtures/hostileDeck";
 import { cleanEditorHtml, prepareEditableHtml, SAMPLE_HTML } from "../htmlDocument";
 import {
@@ -52,10 +52,14 @@ function installBridgeWithHostileDeck(html = HOSTILE_DECK_HTML) {
   return setup;
 }
 
-function postCommand(win: TestWindow, command: Record<string, unknown>) {
+function postCommand(win: TestWindow, command: Record<string, unknown>, sessionToken?: string) {
   win.dispatchEvent(
     new win.MessageEvent("message", {
-      data: { type: "wysiwyg-command", ...command },
+      data: {
+        type: "wysiwyg-command",
+        ...command,
+        ...(sessionToken === undefined ? {} : { sessionToken }),
+      },
       source: win.parent,
     }),
   );
@@ -100,6 +104,10 @@ function latestLayersMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-layers").at(-1);
 }
 
+function latestOutlineMessage(messages: any[]) {
+  return messages.filter((message) => message.type === "wysiwyg-outline").at(-1);
+}
+
 function latestSelectionMessage(messages: any[]) {
   return messages.filter((message) => message.type === "wysiwyg-selection").at(-1);
 }
@@ -122,6 +130,18 @@ function stubRect(element: Element, rect: Partial<DOMRect>) {
 function click(win: TestWindow, target: Element, init: MouseEventInit = {}) {
   target.dispatchEvent(
     new win.MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 1,
+      clientY: 1,
+      ...init,
+    }),
+  );
+}
+
+function doubleClick(win: TestWindow, target: Element, init: MouseEventInit = {}) {
+  target.dispatchEvent(
+    new win.MouseEvent("dblclick", {
       bubbles: true,
       cancelable: true,
       clientX: 1,
@@ -416,7 +436,7 @@ describe("keyboard fence", () => {
     const paragraph = win.document.getElementById("editable");
     expect(paragraph).not.toBeNull();
 
-    click(win, paragraph as Element);
+    doubleClick(win, paragraph as Element);
     expect(paragraph?.getAttribute("contenteditable")).toBe("true");
 
     for (const key of [" ", "Backspace", "ArrowLeft", "PageDown"]) {
@@ -431,7 +451,7 @@ describe("keyboard fence", () => {
   it("blocks deck navigation and browser defaults outside typing contexts", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
     postCommand(win, { command: "set-mode", mode: "select" });
 
     const space = keydown(win, win.document.body, " ");
@@ -459,7 +479,7 @@ describe("keyboard fence", () => {
     keydown(win, win.document.body, "s", { ctrlKey: true });
     expect(messages).toContainEqual({ type: "wysiwyg-shortcut", action: "save" });
 
-    click(win, paragraph);
+    doubleClick(win, paragraph);
     const undo = keydown(win, paragraph, "z", { ctrlKey: true });
     expect(undo.defaultPrevented).toBe(false);
     expect(messages).not.toContainEqual({ type: "wysiwyg-shortcut", action: "undo" });
@@ -493,13 +513,12 @@ describe("keyboard fence", () => {
     let target: EventTarget = win.document.body;
     if (typing) {
       if (mode === "text") {
+        doubleClick(win, paragraph);
         target = paragraph;
       } else {
         input.focus();
         target = input;
       }
-    } else if (mode === "text") {
-      keydown(win, paragraph, "Escape");
     }
 
     win.__deckKeysSeen = [];
@@ -520,7 +539,7 @@ describe("keyboard fence", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
     const input = win.document.getElementById("deck-input") as HTMLInputElement;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
     postCommand(win, { command: "set-mode", mode: "select" });
     input.focus();
 
@@ -538,7 +557,7 @@ describe("editor key semantics", () => {
   it("nudges only in Move mode", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as HTMLElement;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
 
     postCommand(win, { command: "set-mode", mode: "text" });
     keydown(win, win.document.body, "ArrowRight");
@@ -552,7 +571,7 @@ describe("editor key semantics", () => {
   it("uses Backspace as Delete only outside typing contexts", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
 
     keydown(win, paragraph, "Backspace");
     expect(win.document.getElementById("editable")).not.toBeNull();
@@ -568,7 +587,7 @@ describe("editor key semantics", () => {
     const paragraph = win.document.getElementById("editable") as Element;
     const slide = win.document.querySelector("section.slide") as Element;
 
-    click(win, paragraph);
+    doubleClick(win, paragraph);
     expect(latestSelectionMessage(messages).selected).toMatchObject({
       id: paragraph.getAttribute("data-wysiwyg-id"),
       editableText: true,
@@ -612,12 +631,21 @@ describe("editor key semantics", () => {
     expect(win.document.getElementById("headline")?.textContent).toBe("New headline");
     expect(win.document.getElementById("supporting")?.textContent).toBe("Supporting line");
     expect(body.children).toHaveLength(2);
+    expect(messages.filter((message) => message.type === "wysiwyg-operation").at(-1)).toMatchObject({
+      operation: {
+        kind: "text",
+        reason: "text",
+        value: "New headline",
+        locator: { tagName: "h1" },
+      },
+    });
+    expect(messages.some((message) => message.type === "wysiwyg-document-change")).toBe(false);
   });
 
   it("treats Escape as an editing ladder", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
 
     keydown(win, paragraph, "Escape");
     expect(paragraph.hasAttribute("contenteditable")).toBe(false);
@@ -629,11 +657,25 @@ describe("editor key semantics", () => {
 });
 
 describe("editing polish", () => {
+  it("uses single click for selection and double click for explicit text editing", () => {
+    const { win, messages } = installBridgeWithHostileDeck();
+    const paragraph = win.document.getElementById("editable") as Element;
+
+    click(win, paragraph);
+    expect(paragraph.getAttribute("data-wysiwyg-selected")).toBe("true");
+    expect(paragraph.hasAttribute("contenteditable")).toBe(false);
+    expect(latestSelectionMessage(messages).selected.editing).toBe(false);
+
+    doubleClick(win, paragraph);
+    expect(paragraph.getAttribute("contenteditable")).toBe("true");
+    expect(latestSelectionMessage(messages).selected.editing).toBe(true);
+  });
+
   it("marks focused editing state and restores spellcheck/contenteditable metadata", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
 
-    click(win, paragraph);
+    doubleClick(win, paragraph);
 
     expect(paragraph.getAttribute("data-wysiwyg-editing")).toBe("true");
     expect(paragraph.getAttribute("spellcheck")).toBe("true");
@@ -661,7 +703,7 @@ describe("editing polish", () => {
     const { win } = installBridgeWithHostileDeck();
     const paragraph = win.document.getElementById("editable") as Element;
     const text = paragraph.firstChild as Text;
-    click(win, paragraph);
+    doubleClick(win, paragraph);
 
     const range = win.document.createRange();
     range.setStart(text, text.textContent?.length ?? 0);
@@ -806,13 +848,13 @@ describe("caret placement", () => {
         return range;
       };
 
-    click(win, paragraph, { clientX: 42, clientY: 9 });
+    doubleClick(win, paragraph, { clientX: 42, clientY: 9 });
 
     expect(calledWith).toEqual([42, 9]);
     expect(win.getSelection()?.anchorNode).toBe(text);
 
     calledWith = null;
-    click(win, paragraph, { clientX: 8, clientY: 3 });
+    doubleClick(win, paragraph, { clientX: 8, clientY: 3 });
     expect(calledWith).toBeNull();
   });
 });
@@ -891,6 +933,201 @@ describe("deck detection", () => {
       "Risk visual",
       "Closeout visual",
     ]);
+  });
+
+  it("uses an explicit CSS selector when automatic detection is insufficient", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><body><main>
+        <article class="canvas-page"><h1>Custom one</h1></article>
+        <article class="canvas-page"><h1>Custom two</h1></article>
+        <aside class="canvas-page-note">Not a page</aside>
+      </main></body></html>
+    `);
+    installEditorBridge(win);
+    expect(latestDeckMessage(messages).slides).toEqual([]);
+
+    postCommand(win, { command: "set-deck-selector", selector: ".canvas-page" });
+
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Custom one",
+      "Custom two",
+    ]);
+  });
+
+  it("promotes selected siblings and publishes a restorable structural path", () => {
+    const { win, messages } = createWindow(`
+      <!doctype html><html><body><main><div class="wrapper">
+        <article><h1>Sibling one</h1></article>
+        <article id="picked"><h1>Sibling two</h1></article>
+        <article><h1>Sibling three</h1></article>
+      </div></main></body></html>
+    `);
+    installEditorBridge(win);
+    const picked = win.document.getElementById("picked")!;
+    picked.dispatchEvent(new win.MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    postCommand(win, { command: "set-deck-from-selection" });
+
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Sibling one",
+      "Sibling two",
+      "Sibling three",
+    ]);
+    const preference = messages.filter((message) => message.type === "wysiwyg-deck-preference").at(-1);
+    expect(preference.siblingPath).toEqual([1, 0, 0]);
+
+    postCommand(win, { command: "clear-deck-override" });
+    expect(latestDeckMessage(messages).slides).toEqual([]);
+    postCommand(win, { command: "set-deck-from-selection", siblingPath: preference.siblingPath });
+    expect(latestDeckMessage(messages).slides).toHaveLength(3);
+  });
+
+  it("reports invalid manual selectors without breaking the bridge", () => {
+    const { win, messages } = createWindow("<!doctype html><html><body><main><p>Body</p></main></body></html>");
+    installEditorBridge(win);
+
+    postCommand(win, { command: "set-deck-selector", selector: "[invalid" });
+
+    expect(latestDeckMessage(messages).slides).toEqual([]);
+    expect(messages.some((message) => message.diagnostic?.code === "deck-selector-invalid")).toBe(true);
+  });
+
+  it("uses persisted structural paths for individually marked pages", () => {
+    const { win, messages } = createWindow(`<!doctype html><html><body><main>
+      <article><h1>Marked one</h1></article><aside>Ignored</aside><article><h1>Marked two</h1></article>
+    </main></body></html>`);
+    installEditorBridge(win);
+    postCommand(win, { command: "set-deck-marked", paths: [[1, 0, 0], [1, 0, 2]] });
+    expect(latestDeckMessage(messages).slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Marked one", "Marked two",
+    ]);
+  });
+
+  it("republishes a deck when slides are inserted after bridge startup", async () => {
+    vi.useFakeTimers();
+    const { win, messages } = createWindow("<main id='deck'></main>");
+    installKeyboardFence(win);
+    installEditorBridge(win);
+    expect(latestDeckMessage(messages)?.slides).toEqual([]);
+    const deck = win.document.querySelector("#deck");
+    deck?.insertAdjacentHTML(
+      "beforeend",
+      '<section class="slide"><h1>Late one</h1></section><section class="slide"><h1>Late two</h1></section>',
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(130);
+    expect(latestDeckMessage(messages)?.slides.map((slide: { title: string }) => slide.title)).toEqual([
+      "Late one",
+      "Late two",
+    ]);
+    vi.useRealTimers();
+  });
+});
+
+describe("document outline and ancestor selection", () => {
+  const outlineHtml = `<!doctype html><html><body><main id="workspace"><section class="card"><div class="inner"><button id="target">Edit me</button></div></section></main></body></html>`;
+
+  it("publishes the full document hierarchy rather than only selected siblings", () => {
+    const { win, messages } = createWindow(outlineHtml);
+    installEditorBridge(win);
+
+    const outline = latestOutlineMessage(messages);
+    expect(outline.truncated).toBe(false);
+    expect(outline.items.map((item: { label: string }) => item.label)).toEqual([
+      "body",
+      "main#workspace",
+      "section.card",
+      "div.inner",
+      "button#target",
+    ]);
+    expect(outline.items.map((item: { depth: number }) => item.depth)).toEqual([0, 0, 1, 2, 3]);
+  });
+
+  it("cycles from a clicked leaf through its ancestors with Alt-click", () => {
+    const { win, messages } = createWindow(outlineHtml);
+    installEditorBridge(win);
+    const target = win.document.getElementById("target")!;
+
+    click(win, target);
+    expect(messages.filter((message) => message.type === "wysiwyg-selection").at(-1).selected.tagName).toBe("button");
+    click(win, target, { altKey: true });
+    expect(messages.filter((message) => message.type === "wysiwyg-selection").at(-1).selected.tagName).toBe("div");
+    click(win, target, { altKey: true });
+    expect(messages.filter((message) => message.type === "wysiwyg-selection").at(-1).selected.tagName).toBe("section");
+  });
+
+  it("supports editor-only hide and lock controls without contaminating export", () => {
+    const { win, messages } = createWindow(outlineHtml);
+    installEditorBridge(win);
+    const outline = latestOutlineMessage(messages);
+    const card = outline.items.find((item: { label: string }) => item.label === "section.card");
+
+    postCommand(win, { command: "set-outline-hidden", id: card.id, enabled: true });
+    postCommand(win, { command: "set-outline-locked", id: card.id, enabled: true });
+    postCommand(win, { command: "set-picking-ignored", id: card.id, enabled: true });
+
+    const cardElement = win.document.querySelector("section.card")!;
+    expect(cardElement.getAttribute("data-wysiwyg-editor-hidden")).toBe("true");
+    expect(cardElement.getAttribute("data-wysiwyg-editor-locked")).toBe("true");
+    expect(cardElement.getAttribute("data-wysiwyg-editor-pick-through")).toBe("true");
+    const updated = latestOutlineMessage(messages).items.find((item: { id: string }) => item.id === card.id);
+    expect(updated).toMatchObject({ hidden: true, locked: true, pickThrough: true });
+
+    const cleaned = cleanEditorHtml("<!doctype html>\n" + win.document.documentElement.outerHTML);
+    expect(cleaned).not.toContain("data-wysiwyg-editor-hidden");
+    expect(cleaned).not.toContain("data-wysiwyg-editor-locked");
+    expect(cleaned).not.toContain("data-wysiwyg-editor-pick-through");
+  });
+
+  it("explains unsupported direct-edit targets", () => {
+    const { win, messages } = createWindow("<!doctype html><html><body><canvas id='chart'></canvas></body></html>");
+    installEditorBridge(win);
+    doubleClick(win, win.document.getElementById("chart")!);
+    expect(messages.some((message) => message.diagnostic?.code === "unsupported-edit-target")).toBe(true);
+  });
+});
+
+describe("bridge session isolation", () => {
+  it("tags outbound messages and ignores missing or incorrect command tokens", () => {
+    const { win, messages } = createWindow("<!doctype html><html><body><button id='target'>Target</button></body></html>");
+    installEditorBridge(win, "correct-token");
+    const target = latestOutlineMessage(messages).items.find((item: { label: string }) => item.label === "button#target");
+
+    expect(messages.length).toBeGreaterThan(0);
+    expect(messages.every((message) => message.sessionToken === "correct-token")).toBe(true);
+
+    postCommand(win, { command: "select", id: target.id });
+    postCommand(win, { command: "select", id: target.id }, "wrong-token");
+    expect(messages.some((message) => message.type === "wysiwyg-selection")).toBe(false);
+
+    postCommand(win, { command: "select", id: target.id }, "correct-token");
+    expect(messages.filter((message) => message.type === "wysiwyg-selection").at(-1).selected.tagName).toBe("button");
+  });
+
+  it("rejects malformed current-session commands without mutating the document", () => {
+    const { win, messages } = createWindow("<!doctype html><html><body><p id='target'>Original</p></body></html>");
+    installEditorBridge(win, "correct-token");
+    const target = latestOutlineMessage(messages).items.find((item: { label: string }) => item.label === "p#target");
+    postCommand(win, { command: "select", id: target.id }, "correct-token");
+    messages.length = 0;
+
+    postCommand(win, { command: "set-text", text: 7 }, "correct-token");
+    postCommand(win, { command: "request-html", unexpected: true }, "correct-token");
+
+    expect(win.document.getElementById("target")?.textContent).toBe("Original");
+    expect(messages.filter((message) => message.diagnostic?.code === "bridge-message-rejected")).toHaveLength(2);
+    expect(messages.some((message) => message.type === "wysiwyg-document-change")).toBe(false);
+  });
+
+  it("includes the session token in fenced keyboard shortcuts", () => {
+    const { win, messages } = createWindow("<!doctype html><html><body><p>Body</p></body></html>");
+    installKeyboardFence(win, "shortcut-token");
+    keydown(win, win.document.body, "s", { ctrlKey: true });
+    expect(messages.at(-1)).toMatchObject({
+      type: "wysiwyg-shortcut",
+      action: "save",
+      sessionToken: "shortcut-token",
+    });
   });
 });
 

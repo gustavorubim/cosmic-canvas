@@ -1,7 +1,7 @@
 import { type SelectedElement } from "./protocol";
 
 export const DECK_HINT_MESSAGE =
-  "Edit modes type text - use the timeline for slides. Preview runs deck shortcuts.";
+  "Single-click selects, double-click edits text, and the Pages panel navigates slides.";
 
 export function hostDocumentChangeDelay(reason: string) {
   return reason === "input" || reason === "source" ? 1000 : 250;

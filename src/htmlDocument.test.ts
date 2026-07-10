@@ -6,6 +6,7 @@ import {
   createPrintHtml,
   createSelfContainedHtml,
   normalizeDeckHtml,
+  inlineTrustedModuleEntrypoints,
   prepareEditableHtml,
 } from "./htmlDocument";
 
@@ -65,6 +66,26 @@ describe("prepareEditableHtml (untrusted)", () => {
 });
 
 describe("cleanEditorHtml", () => {
+  it("inlines trusted module entrypoints for opaque preview origins and restores src on cleanup", async () => {
+    const hydrated = await inlineTrustedModuleEntrypoints(
+      '<script type="module" src="modules/app.js"></script>',
+      "https://host.test/docs/",
+      async () => new Response('document.body.dataset.loaded = "true";'),
+    );
+    expect(hydrated).toContain('data-wysiwyg-original-module-src="modules/app.js"');
+    expect(hydrated).toContain("dataset.loaded");
+    const cleaned = cleanEditorHtml(hydrated);
+    expect(cleaned).toContain('src="modules/app.js"');
+    expect(cleaned).not.toContain("dataset.loaded");
+    expect(cleaned).not.toContain("data-wysiwyg-original-module-src");
+  });
+
+  it("injects a preview session token into both bridges and strips it on export", () => {
+    const prepared = prepareEditableHtml("<p>Session</p>", false, "", "session-secret");
+    expect(prepared.match(/session-secret/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(cleanEditorHtml(prepared)).not.toContain("session-secret");
+  });
+
   it("removes all editor artifacts and the bridge", () => {
     const prepared = prepareEditableHtml(SAMPLE_HTML);
     const cleaned = cleanEditorHtml(prepared);
@@ -85,6 +106,26 @@ describe("cleanEditorHtml", () => {
     expect(script?.hasAttribute("type")).toBe(false);
     expect(script?.hasAttribute("data-wysiwyg-preserved-script")).toBe(false);
     expect(script?.textContent).toContain("alert(1)");
+  });
+
+  it("temporarily disables document CSP for editing and restores it on clean export", () => {
+    const input = '<meta http-equiv="Content-Security-Policy" content="script-src \'none\'"><p>Safe</p>';
+    const prepared = prepareEditableHtml(input);
+    const preview = new DOMParser().parseFromString(prepared, "text/html");
+    const previewMeta = preview.querySelector("meta[data-wysiwyg-original-http-equiv]");
+    expect(previewMeta?.hasAttribute("http-equiv")).toBe(false);
+    expect(previewMeta?.getAttribute("data-wysiwyg-original-http-equiv")).toBe("Content-Security-Policy");
+    const cleaned = cleanEditorHtml(prepared);
+    const exported = new DOMParser().parseFromString(cleaned, "text/html");
+    expect(exported.querySelector("meta[http-equiv]")?.getAttribute("http-equiv")).toBe("Content-Security-Policy");
+    expect(cleaned).not.toContain("data-wysiwyg-original-http-equiv");
+  });
+
+  it("injects an editor-only resource base and removes it from clean export", () => {
+    const prepared = prepareEditableHtml('<img src="images/demo.png">', false, "https://resource.test/folder");
+    const preview = new DOMParser().parseFromString(prepared, "text/html");
+    expect(preview.querySelector("base")?.href).toBe("https://resource.test/folder/");
+    expect(cleanEditorHtml(prepared)).not.toContain("https://resource.test/folder/");
   });
 });
 

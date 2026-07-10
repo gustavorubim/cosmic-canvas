@@ -1,3 +1,5 @@
+import { isBridgeCommand } from "../bridgeCommandValidation";
+
 type FenceState = {
   mode: string;
 };
@@ -11,9 +13,74 @@ type CosmicWindow = Window &
     __cosmicFenceInstalled?: boolean;
     __cosmicFenceState?: FenceState;
     __cosmicHandleEditorKey?: (event: KeyboardEvent, context: EditorKeyContext) => boolean;
+    __cosmicMetrics?: Record<string, number[]> & { thumbnailBuilds?: number[] };
+    __cosmicThumbnailLog?: string[];
+    __cosmicThumbnailInvalidations?: string[];
   };
 
 const NONE = "__wysiwyg_none__";
+
+export type MutationImpact = "deck-structural" | "active-slide-only" | "thumbnail-affecting" | "irrelevant";
+
+/** Classify observed author-DOM mutations so unrelated changes do not trigger
+ * every navigator and outline cache. This is also embedded in the srcdoc. */
+export function classifyBridgeMutation(
+  record: MutationRecord,
+  slideSelector: string,
+  activeSlideId: string,
+): MutationImpact {
+  const elementFor = (node: Node | null) => {
+    if (!node) return null;
+    return node.nodeType === 1 ? node as Element : node.parentElement;
+  };
+  const closestSlide = (node: Node | null) => {
+    const element = elementFor(node);
+    try {
+      return element?.closest(slideSelector) || null;
+    } catch {
+      return null;
+    }
+  };
+  const isSlideTree = (node: Node) => {
+    const element = elementFor(node);
+    if (!element) return false;
+    try {
+      return element.matches(slideSelector) || Boolean(element.querySelector(slideSelector));
+    } catch {
+      return false;
+    }
+  };
+
+  if (record.type === "characterData") {
+    return closestSlide(record.target) ? "thumbnail-affecting" : "irrelevant";
+  }
+  if (record.type === "childList") {
+    const changed = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
+    if (changed.some(isSlideTree)) return "deck-structural";
+    return closestSlide(record.target) ? "thumbnail-affecting" : "deck-structural";
+  }
+  if (record.type !== "attributes") return "irrelevant";
+
+  const attribute = record.attributeName || "";
+  if (attribute.startsWith("data-wysiwyg-")) return "irrelevant";
+  if (["aria-current", "data-active"].includes(attribute)) return "active-slide-only";
+  if (["id", "class", "data-slide", "data-slide-id", "data-page", "data-page-id", "aria-roledescription"].includes(attribute)) {
+    return "deck-structural";
+  }
+  const slide = closestSlide(record.target);
+  if (!slide) return attribute === "style" ? "deck-structural" : "irrelevant";
+  if (activeSlideId && (slide as HTMLElement).dataset.wysiwygId === activeSlideId && attribute === "hidden") {
+    return "active-slide-only";
+  }
+  return "thumbnail-affecting";
+}
+
+export function combineMutationImpacts(impacts: MutationImpact[]): MutationImpact {
+  if (impacts.includes("deck-structural")) return "deck-structural";
+  if (impacts.includes("thumbnail-affecting")) return "thumbnail-affecting";
+  if (impacts.includes("active-slide-only")) return "active-slide-only";
+  return "irrelevant";
+}
 
 export function inTypingContextForElement(active: Element | null): boolean {
   if (!active) return false;
@@ -56,7 +123,7 @@ export function inTypingContextForElement(active: Element | null): boolean {
 export function canDirectlyEditTextElement(element: Element | null): boolean {
   if (!element) return false;
   const tag = element.tagName.toLowerCase();
-  if (["html", "head", "body", "script", "style", "img", "input", "select", "textarea"].includes(tag)) {
+  if (["html", "head", "body", "script", "style", "img", "input", "select", "textarea", "canvas", "iframe", "svg"].includes(tag)) {
     return false;
   }
 
@@ -604,7 +671,7 @@ export function collectDeckSlides(root: ParentNode, options: { force?: boolean }
     });
 }
 
-export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow) {
+export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow, sessionToken = "") {
   if (win.__cosmicFenceInstalled) return;
   win.__cosmicFenceInstalled = true;
   win.__cosmicFenceState = win.__cosmicFenceState || { mode: "text" };
@@ -649,7 +716,11 @@ export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow)
   }
 
   function postShortcut(action: string) {
-    win.parent?.postMessage({ type: "wysiwyg-shortcut", action }, "*");
+    win.parent?.postMessage({
+      type: "wysiwyg-shortcut",
+      action,
+      ...(sessionToken ? { sessionToken } : {}),
+    }, "*");
   }
 
   function onKey(event: KeyboardEvent) {
@@ -693,17 +764,24 @@ export function installKeyboardFence(win: CosmicWindow = window as CosmicWindow)
   });
 }
 
-export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) {
+export function installEditorBridge(win: CosmicWindow = window as CosmicWindow, sessionToken = "") {
   const document = win.document;
   const SLIDE_SELECTOR = deckSlideSelector();
   let mode = "text";
   let idCounter = 1;
   let selectedElement: Element | null = null;
+  let editingElement: Element | null = null;
   let hoveredElement: Element | null = null;
   let inputTimer = 0;
   let deckTimer = 0;
+  let outlineTimer = 0;
+  let activeScrollFrame = 0;
+  let operationCounter = 0;
   let activeSlideId = "";
   let forceTimeline = false;
+  let manualDeckSelector = "";
+  let manualSiblingPath: number[] = [];
+  let manualMarkedPaths: number[][] = [];
   let dragState: {
     element: HTMLElement;
     startX: number;
@@ -725,6 +803,19 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   let resizeHandle: HTMLButtonElement | null = null;
   let verticalGuide: HTMLDivElement | null = null;
   let horizontalGuide: HTMLDivElement | null = null;
+  let deckObserver: MutationObserver | null = null;
+  let slideVisibilityObserver: IntersectionObserver | null = null;
+  let observedSlideSignature = "";
+  const thumbnailCache = new WeakMap<Element, string>();
+  const editorMutatedElements = new WeakSet<Element>();
+  const lastPublishedText = new WeakMap<Element, string>();
+  const metrics = win.__cosmicMetrics || (win.__cosmicMetrics = { thumbnailBuilds: [0] });
+
+  function recordTiming(name: string, startedAt: number) {
+    const values = metrics[name] || (metrics[name] = []);
+    values.push(Math.max(0, win.performance.now() - startedAt));
+    if (values.length > 200) values.shift();
+  }
 
   const fenceState = win.__cosmicFenceState || (win.__cosmicFenceState = { mode });
 
@@ -744,11 +835,14 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function serialize() {
-    return "<!doctype html>\n" + document.documentElement.outerHTML;
+    const startedAt = win.performance.now();
+    const html = "<!doctype html>\n" + document.documentElement.outerHTML;
+    recordTiming("serialization", startedAt);
+    return html;
   }
 
   function post(type: string, payload: Record<string, unknown> = {}) {
-    win.parent.postMessage({ type, ...payload }, "*");
+    win.parent.postMessage({ type, ...payload, ...(sessionToken ? { sessionToken } : {}) }, "*");
   }
 
   function colorToHex(value: string) {
@@ -780,7 +874,47 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     return "";
   }
 
+  function eligibleManualSlide(element: Element) {
+    const tag = element.tagName.toLowerCase();
+    return !["script", "style", "meta", "link", "title"].includes(tag) &&
+      (element as HTMLElement).dataset.wysiwygEditor !== "true";
+  }
+
+  function elementAtSourcePath(path: number[]) {
+    let node: Element = document.documentElement;
+    for (const index of path) {
+      const children = Array.from(node.children).filter(eligibleManualSlide);
+      if (!Number.isInteger(index) || index < 0 || index >= children.length) return null;
+      node = children[index];
+    }
+    return node;
+  }
+
   function slideCandidates() {
+    if (manualDeckSelector) {
+      try {
+        return Array.from(document.querySelectorAll(manualDeckSelector)).filter(eligibleManualSlide);
+      } catch (error) {
+        post("wysiwyg-diagnostic", {
+          diagnostic: {
+            id: "deck-selector-invalid",
+            code: "deck-selector-invalid",
+            severity: "warning",
+            title: "Page selector is invalid",
+            message: "The custom page selector could not be applied.",
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        });
+        return [];
+      }
+    }
+    if (manualSiblingPath.length) {
+      const parent = elementAtSourcePath(manualSiblingPath);
+      return parent ? Array.from(parent.children).filter(eligibleManualSlide) : [];
+    }
+    if (manualMarkedPaths.length) {
+      return manualMarkedPaths.map(elementAtSourcePath).filter((element): element is Element => Boolean(element));
+    }
     return collectDeckSlides(document, { force: forceTimeline });
   }
 
@@ -818,9 +952,48 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function slideThumbnailHtml(slide: Element) {
+    const cached = thumbnailCache.get(slide);
+    if (cached !== undefined) return cached;
+    metrics.thumbnailBuilds = metrics.thumbnailBuilds || [0];
+    metrics.thumbnailBuilds[0] = (metrics.thumbnailBuilds[0] || 0) + 1;
+    const thumbnailLog = win.__cosmicThumbnailLog || (win.__cosmicThumbnailLog = []);
+    thumbnailLog.push(ensureId(slide));
+    if (thumbnailLog.length > 500) thumbnailLog.shift();
+    const startedAt = win.performance.now();
     const clone = slide.cloneNode(true) as Element;
     scrubThumbnailElement(clone);
-    return clone.outerHTML.slice(0, 6000);
+    const html = clone.outerHTML.slice(0, 6000);
+    thumbnailCache.set(slide, html);
+    recordTiming("thumbnail", startedAt);
+    recordTiming("thumbnailGeneration", startedAt);
+    return html;
+  }
+
+  function invalidateThumbnail(slide: Element, reason: string) {
+    thumbnailCache.delete(slide);
+    const invalidations = win.__cosmicThumbnailInvalidations || (win.__cosmicThumbnailInvalidations = []);
+    invalidations.push(`${ensureId(slide)}:${reason}`);
+    if (invalidations.length > 500) invalidations.shift();
+  }
+
+  function observeSlideVisibility(slides: Element[]) {
+    if (typeof win.IntersectionObserver !== "function") return;
+    const signature = slides.map((slide) => ensureId(slide)).join("|");
+    if (signature === observedSlideSignature) return;
+    observedSlideSignature = signature;
+    slideVisibilityObserver?.disconnect();
+    slideVisibilityObserver = new win.IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible || ensureId(visible.target) === activeSlideId) return;
+        markActiveSlide(visible.target);
+        scheduleDeckPublish();
+      },
+      { threshold: [0.15, 0.35, 0.6, 0.85] },
+    );
+    slides.forEach((slide) => slideVisibilityObserver?.observe(slide));
   }
 
   function visibleArea(element: Element) {
@@ -832,7 +1005,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   function nearestSlide(slides: Element[]) {
     if (!slides.length) return null;
-    const selectedSlide = selectedElement ? selectedElement.closest(SLIDE_SELECTOR) : null;
+    const selectedSlide = selectedElement
+      ? slides.find((slide) => slide === selectedElement || slide.contains(selectedElement)) || null
+      : null;
     if (selectedSlide && slides.includes(selectedSlide)) return selectedSlide;
     const activeById = activeSlideId
       ? document.querySelector('[data-wysiwyg-id="' + win.CSS.escape(activeSlideId) + '"]')
@@ -855,13 +1030,19 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function publishDeck() {
+    const startedAt = win.performance.now();
     const slides = slideCandidates();
     if (!slides.length) {
+      slideVisibilityObserver?.disconnect();
+      observedSlideSignature = "";
       post("wysiwyg-deck", { slides: [], activeId: "" });
+      recordTiming("deck", startedAt);
+      recordTiming("deckDetection", startedAt);
       return;
     }
     const activeSlide = nearestSlide(slides);
     markActiveSlide(activeSlide);
+    observeSlideVisibility(slides);
     post("wysiwyg-deck", {
       activeId: activeSlide ? (activeSlide as HTMLElement).dataset.wysiwygId : "",
       slides: slides.map((slide, index) => ({
@@ -872,6 +1053,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         thumbnailHtml: slideThumbnailHtml(slide),
       })),
     });
+    recordTiming("deck", startedAt);
+    recordTiming("deckDetection", startedAt);
   }
 
   function scheduleDeckPublish() {
@@ -879,7 +1062,19 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     deckTimer = win.setTimeout(publishDeck, 120);
   }
 
+  function publishActiveFromViewport() {
+    const slides = slideCandidates();
+    const visible = slides
+      .map((slide) => ({ slide, area: visibleArea(slide) }))
+      .sort((a, b) => b.area - a.area)[0];
+    if (!visible || visible.area <= 0 || ensureId(visible.slide) === activeSlideId) return;
+    markActiveSlide(visible.slide);
+    publishDeck();
+  }
+
   function publishChange(reason = "edit") {
+    const changedSlide = selectedElement?.closest(SLIDE_SELECTOR);
+    if (changedSlide) invalidateThumbnail(changedSlide, `full:${reason}`);
     post("wysiwyg-document-change", {
       reason,
       html: serialize(),
@@ -890,6 +1085,48 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     publishLayers();
     scheduleDeckPublish();
     publishAudit();
+  }
+
+  function operationLocator(element: Element) {
+    return {
+      path: sourcePath(element),
+      tagName: element.tagName.toLowerCase(),
+      domId: element.id || "",
+      classes: Array.from(element.classList),
+    };
+  }
+
+  function publishIncrementalChange(
+    kind: "text" | "style" | "class",
+    value: string,
+    target: Element | null,
+    reason: string,
+  ) {
+    if (!target) {
+      publishChange(reason);
+      return;
+    }
+    if (kind === "text") {
+      if (lastPublishedText.get(target) === value) return;
+      lastPublishedText.set(target, value);
+    }
+    const changedSlide = slideCandidates().find((slide) => slide === target || slide.contains(target));
+    if (changedSlide) invalidateThumbnail(changedSlide, `incremental:${reason}`);
+    editorMutatedElements.add(target);
+    win.setTimeout(() => editorMutatedElements.delete(target), 0);
+    post("wysiwyg-operation", {
+      operation: {
+        id: "op-" + ++operationCounter,
+        kind,
+        reason,
+        locator: operationLocator(target),
+        value,
+      },
+      scrollX: win.scrollX,
+      scrollY: win.scrollY,
+    });
+    publishSelected();
+    scheduleDeckPublish();
   }
 
   function auditLabel(element: Element) {
@@ -916,6 +1153,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function publishAudit() {
+    const startedAt = win.performance.now();
     const findings: Array<{ id: string; elementId: string; type: string; label: string; message: string }> = [];
     document.querySelectorAll("img").forEach((image) => {
       if ((image as HTMLElement).dataset.wysiwygEditor === "true") return;
@@ -946,6 +1184,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     });
 
     post("wysiwyg-audit", { findings });
+    recordTiming("auditScan", startedAt);
   }
 
   function elementLabel(element: Element) {
@@ -964,6 +1203,23 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       node = node.parentElement;
     }
     return trail;
+  }
+
+  function sourcePath(element: Element) {
+    const path: number[] = [];
+    let node: Element | null = element;
+    while (node && node !== document.documentElement) {
+      const parent: Element | null = node.parentElement;
+      if (!parent) return [];
+      const siblings = Array.from(parent.children).filter(
+        (sibling) => (sibling as HTMLElement).dataset?.wysiwygEditor !== "true",
+      );
+      const index = siblings.indexOf(node);
+      if (index < 0) return [];
+      path.unshift(index);
+      node = parent;
+    }
+    return path;
   }
 
   function ensureChip() {
@@ -1109,9 +1365,14 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   }
 
   function publishSelected() {
+    const startedAt = win.performance.now();
     updateChip();
     if (!selectedElement) {
       post("wysiwyg-selection", { selected: null });
+      publishLayers();
+      publishOutline();
+      recordTiming("selection", startedAt);
+      recordTiming("selectionPublication", startedAt);
       return;
     }
 
@@ -1128,8 +1389,10 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         text: textTarget?.textContent || "",
         childElementCount: selectedElement.childElementCount,
         editableText: Boolean(textTarget),
+        editing: Boolean(textTarget && editingElement === textTarget),
         classes: Array.from(selectedElement.classList),
         ancestors: breadcrumb(selectedElement),
+        sourcePath: sourcePath(selectedElement),
         isImage,
         imageSrc: isImage ? selectedElement.getAttribute("src") || "" : "",
         imageAlt: isImage ? selectedElement.getAttribute("alt") || "" : "",
@@ -1151,6 +1414,9 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       },
     });
     publishLayers();
+    publishOutline();
+    recordTiming("selection", startedAt);
+    recordTiming("selectionPublication", startedAt);
   }
 
   function publishLayers() {
@@ -1174,8 +1440,63 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     post("wysiwyg-layers", { layers });
   }
 
+  function eligibleOutlineElement(element: Element) {
+    const tag = element.tagName.toLowerCase();
+    return !["script", "style", "meta", "link", "title"].includes(tag) &&
+      (element as HTMLElement).dataset.wysiwygEditor !== "true" &&
+      !element.closest('[data-wysiwyg-editor="true"]');
+  }
+
+  function outlineDepth(element: Element) {
+    let depth = 0;
+    let parent = element.parentElement;
+    while (parent && parent !== document.body && parent !== document.documentElement) {
+      if (eligibleOutlineElement(parent)) depth += 1;
+      parent = parent.parentElement;
+    }
+    return depth;
+  }
+
+  function publishOutline() {
+    const all = document.body
+      ? [document.body, ...Array.from(document.body.querySelectorAll("*"))].filter(eligibleOutlineElement)
+      : [];
+    const limited = all.slice(0, 5000);
+    post("wysiwyg-outline", {
+      truncated: all.length > limited.length,
+      items: limited.map((element) => ({
+        id: ensureId(element),
+        parentId: element.parentElement && eligibleOutlineElement(element.parentElement)
+          ? ensureId(element.parentElement)
+          : "",
+        label: elementLabel(element),
+        depth: outlineDepth(element),
+        hasChildren: Array.from(element.children).some(eligibleOutlineElement),
+        active: element === selectedElement,
+        hidden: element.getAttribute("data-wysiwyg-editor-hidden") === "true",
+        locked: element.getAttribute("data-wysiwyg-editor-locked") === "true",
+        pickThrough: element.getAttribute("data-wysiwyg-editor-pick-through") === "true",
+      })),
+    });
+  }
+
+  function scheduleOutlinePublish() {
+    win.clearTimeout(outlineTimer);
+    outlineTimer = win.setTimeout(publishOutline, 80);
+  }
+
+  function setOutlineFlag(data: Record<string, unknown>, attribute: string) {
+    const element = selectedById(String(data.id || ""));
+    if (!element) return;
+    if (Boolean(data.enabled)) element.setAttribute(attribute, "true");
+    else element.removeAttribute(attribute);
+    if (attribute === "data-wysiwyg-editor-hidden" && element === selectedElement) updateChip();
+    publishOutline();
+  }
+
   function restoreContentEditable(element: Element | null) {
     if (!element) return;
+    if (editingElement === element) editingElement = null;
     const original = element.getAttribute("data-wysiwyg-original-contenteditable");
     if (original !== null) {
       if (original === NONE) {
@@ -1214,8 +1535,30 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     target.setAttribute("contenteditable", "true");
     target.setAttribute("spellcheck", "true");
     target.setAttribute("data-wysiwyg-editing", "true");
+    editingElement = target;
+    lastPublishedText.set(target, target.textContent || "");
     (target as HTMLElement).focus({ preventScroll: true });
     return true;
+  }
+
+  function reportUnsupportedEditTarget(element: Element) {
+    const tag = element.tagName.toLowerCase();
+    const message = tag === "canvas"
+      ? "Canvas pixels are not editable as HTML text. Select and style the canvas element instead."
+      : tag === "iframe"
+        ? "Nested iframe content cannot be edited from the parent document."
+        : element.namespaceURI?.includes("svg")
+          ? "This SVG structure has no directly editable text target. Select a text node from the Outline when available."
+          : "This structured container has no safe direct text target. Select a text child from the Outline.";
+    post("wysiwyg-diagnostic", {
+      diagnostic: {
+        id: "unsupported-edit-target-" + ensureId(element),
+        code: "unsupported-edit-target",
+        severity: "info",
+        title: "Element cannot enter text editing",
+        message,
+      },
+    });
   }
 
   function caretPositionToRange(position: CaretPosition | null | undefined) {
@@ -1234,12 +1577,27 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const range =
       docWithCaret.caretRangeFromPoint?.(x, y) ??
       caretPositionToRange(docWithCaret.caretPositionFromPoint?.(x, y));
-    if (!range) return;
+    if (!range) {
+      placeCaretAtEnd(within);
+      return;
+    }
     const container =
       range.startContainer.nodeType === win.Node.ELEMENT_NODE
         ? (range.startContainer as Element)
         : range.startContainer.parentElement;
-    if (!container || !within.contains(container)) return;
+    if (!container || (container !== within && !within.contains(container))) {
+      placeCaretAtEnd(within);
+      return;
+    }
+    const selection = win.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function placeCaretAtEnd(within: Element) {
+    const range = document.createRange();
+    range.selectNodeContents(within);
+    range.collapse(false);
     const selection = win.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -1249,6 +1607,11 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (!(start instanceof win.Element)) return null;
     if ((start as HTMLElement).dataset.wysiwygEditor === "true") return null;
     if (start.closest('[data-wysiwyg-editor="true"]')) return null;
+    const locked = start.closest('[data-wysiwyg-editor-locked="true"]');
+    if (locked) {
+      const parent = locked.parentElement;
+      return parent && parent !== document.documentElement ? parent : null;
+    }
     if (start === document.documentElement || start === document.head) return null;
     return start === document.body ? document.body : start;
   }
@@ -1265,7 +1628,6 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     selectedElement.setAttribute("data-wysiwyg-selected", "true");
     const selectedSlide = selectedElement.closest(SLIDE_SELECTOR);
     if (selectedSlide) activeSlideId = ensureId(selectedSlide);
-    if (mode === "text") makeEditable(selectedElement);
     if (mode !== "text") restoreContentEditable(selectedElement);
     publishSelected();
     scheduleDeckPublish();
@@ -1301,7 +1663,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       if (value === null || value === undefined) continue;
       (selectedElement as HTMLElement).style[key as any] = String(value);
     }
-    publishChange("style");
+    publishIncrementalChange("style", selectedElement.getAttribute("style") || "", selectedElement, "style");
   }
 
   function setText(text: string) {
@@ -1309,7 +1671,19 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     const target = editableTextTarget(selectedElement);
     if (!target) return;
     target.textContent = text;
-    publishChange("text");
+    publishIncrementalChange("text", target.textContent || "", target, "text");
+  }
+
+  function ancestorCycleTarget(target: Element) {
+    const chain: Element[] = [];
+    let node: Element | null = target;
+    while (node && node !== document.documentElement) {
+      if ((node as HTMLElement).dataset.wysiwygEditor !== "true") chain.push(node);
+      node = node.parentElement;
+    }
+    if (!chain.length) return target;
+    const currentIndex = selectedElement ? chain.indexOf(selectedElement) : -1;
+    return currentIndex < 0 ? chain[0] : chain[(currentIndex + 1) % chain.length];
   }
 
   function selectParent() {
@@ -1327,7 +1701,7 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     if (action === "add") selectedElement.classList.add(className);
     else if (action === "remove") selectedElement.classList.remove(className);
     else selectedElement.classList.toggle(className);
-    publishChange("class");
+    publishIncrementalChange("class", selectedElement.getAttribute("class") || "", selectedElement, "class");
   }
 
   function replaceImage(src: unknown, alt: unknown) {
@@ -2478,6 +2852,15 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       return true;
     }
 
+    if (!context.typing && mode === "text" && event.key === "Enter") {
+      const textTarget = editableTextTarget(selectedElement);
+      if (!textTarget) return true;
+      event.preventDefault();
+      if (makeEditable(selectedElement)) placeCaretAtEnd(textTarget);
+      publishSelected();
+      return true;
+    }
+
     if (context.typing) return false;
 
     if (event.key === "Delete" || event.key === "Backspace") {
@@ -2593,13 +2976,31 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       if (mode === "text" && selectedElement === target && inTypingContextForElement(target)) {
         return;
       }
-      const wasEditable = inTypingContextForElement(target);
+      event.preventDefault();
+      event.stopPropagation();
+      selectElement(event.altKey ? ancestorCycleTarget(target) : target);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "dblclick",
+    (event) => {
+      if (mode !== "text") return;
+      const target = pickElement(event.target);
+      if (!target) return;
       event.preventDefault();
       event.stopPropagation();
       selectElement(target);
       const textTarget = editableTextTarget(target);
-      if (mode === "text" && !wasEditable && selectedElement === target && textTarget) {
+      if (!textTarget) {
+        reportUnsupportedEditTarget(target);
+        return;
+      }
+      if (textTarget && editingElement === textTarget) return;
+      if (textTarget && makeEditable(target)) {
         placeCaretAtPoint(event.clientX, event.clientY, textTarget);
+        publishSelected();
       }
     },
     true,
@@ -2607,9 +3008,14 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   document.addEventListener(
     "input",
-    () => {
+    (event) => {
+      const immediateTarget = pickElement(event.target);
+      if (immediateTarget) editorMutatedElements.add(immediateTarget);
       win.clearTimeout(inputTimer);
-      inputTimer = win.setTimeout(() => publishChange("input"), 250);
+      inputTimer = win.setTimeout(() => {
+        const target = editingElement || editableTextTarget(selectedElement);
+        publishIncrementalChange("text", target?.textContent || "", target, "input");
+      }, 250);
     },
     true,
   );
@@ -2622,7 +3028,10 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       const text = event.clipboardData?.getData("text/plain");
       if (text === undefined) return;
       event.preventDefault();
-      if (insertPlainTextAtSelection(text)) publishChange("paste");
+      if (insertPlainTextAtSelection(text)) {
+        const target = editingElement || editableTextTarget(selectedElement);
+        publishIncrementalChange("text", target?.textContent || "", target, "paste");
+      }
     },
     true,
   );
@@ -2647,7 +3056,11 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     true,
   );
 
-  document.addEventListener("blur", () => publishChange("blur"), true);
+  document.addEventListener("blur", () => {
+    if (!editingElement) return;
+    win.clearTimeout(inputTimer);
+    publishIncrementalChange("text", editingElement.textContent || "", editingElement, "blur");
+  }, true);
 
   document.addEventListener(
     "error",
@@ -2656,6 +3069,44 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
       if (target instanceof win.HTMLImageElement) {
         target.dataset.cosmicImageError = "true";
         publishAudit();
+      }
+      if (target instanceof win.Element) {
+        const tag = target.tagName.toLowerCase();
+        const attribute = tag === "link" ? "href" : tag === "video" ? "poster" : "src";
+        const url = target.getAttribute(attribute) || "";
+        const resolvedUrl = attribute in target && typeof (target as any)[attribute] === "string"
+          ? String((target as any)[attribute])
+          : url;
+        if (url && ["img", "script", "link", "source", "video", "audio"].includes(tag)) {
+          const resourceId = ensureId(target) || `${tag}-${url}`;
+          const blocked = /^(?:file|javascript):/i.test(url);
+          const offline = win.navigator.onLine === false || /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::9)?\//i.test(resolvedUrl);
+          const external = /^https?:\/\//i.test(resolvedUrl);
+          const code = blocked
+            ? "resource-blocked"
+            : offline
+              ? "resource-offline"
+              : external
+                ? "resource-cors-or-network"
+                : "resource-unavailable";
+          const title = blocked
+            ? "Unsafe resource path blocked"
+            : offline
+              ? "Resource unavailable offline"
+              : external
+                ? "External resource blocked by CORS or network policy"
+                : "Resource unavailable";
+          post("wysiwyg-diagnostic", {
+            diagnostic: {
+              id: `${code}-${resourceId}`,
+              code,
+              severity: "warning",
+              title,
+              message: `${tag} resource failed to load: ${url}`,
+              detail: resolvedUrl,
+            },
+          });
+        }
       }
     },
     true,
@@ -2673,8 +3124,33 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
 
   win.addEventListener("message", (event) => {
     if (event.source !== win.parent) return;
-    const data = (event.data || {}) as Record<string, unknown>;
-    if (data.type !== "wysiwyg-command") return;
+    if (!isBridgeCommand(event.data)) {
+      if ((event.data as Record<string, unknown> | null)?.type === "wysiwyg-command") {
+        post("wysiwyg-diagnostic", {
+          diagnostic: {
+            id: "bridge-message-rejected",
+            code: "bridge-message-rejected",
+            severity: "warning",
+            title: "Malformed editor command rejected",
+            message: "A parent command failed strict payload validation and was ignored.",
+          },
+        });
+      }
+      return;
+    }
+    const data = event.data;
+    if (sessionToken && data.sessionToken !== sessionToken) {
+      post("wysiwyg-diagnostic", {
+        diagnostic: {
+          id: "bridge-session-rejected",
+          code: "bridge-session-rejected",
+          severity: "warning",
+          title: "Stale editor command rejected",
+          message: "A parent command did not carry the current preview token and was ignored.",
+        },
+      });
+      return;
+    }
 
     if (data.command === "set-mode") {
       mode = typeof data.mode === "string" ? data.mode : "text";
@@ -2684,13 +3160,72 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
         restoreContentEditable(editableTextTarget(selectedElement));
         restoreContentEditable(selectedElement);
       }
-      if (mode === "text" && selectedElement) makeEditable(selectedElement);
       publishSelected();
     }
 
     if (data.command === "set-force-timeline") {
       forceTimeline = Boolean(data.enabled);
+      manualDeckSelector = "";
+      manualSiblingPath = [];
+      manualMarkedPaths = [];
       publishDeck();
+    }
+
+    if (data.command === "set-deck-selector") {
+      manualDeckSelector = typeof data.selector === "string" ? data.selector.trim().slice(0, 500) : "";
+      manualSiblingPath = [];
+      manualMarkedPaths = [];
+      forceTimeline = false;
+      publishDeck();
+    }
+
+    if (data.command === "set-deck-from-selection") {
+      const requestedPath = Array.isArray(data.siblingPath)
+        ? data.siblingPath.filter((part): part is number => Number.isInteger(part) && Number(part) >= 0).slice(0, 64)
+        : [];
+      const parent = requestedPath.length
+        ? elementAtSourcePath(requestedPath)
+        : selectedElement?.parentElement || null;
+      if (parent) {
+        manualSiblingPath = sourcePath(parent);
+        manualDeckSelector = "";
+        manualMarkedPaths = [];
+        forceTimeline = false;
+        post("wysiwyg-deck-preference", { siblingPath: manualSiblingPath });
+      }
+      publishDeck();
+    }
+
+    if (data.command === "clear-deck-override") {
+      manualDeckSelector = "";
+      manualSiblingPath = [];
+      manualMarkedPaths = [];
+      forceTimeline = false;
+      publishDeck();
+    }
+
+    if (data.command === "set-deck-marked") {
+      manualMarkedPaths = Array.isArray(data.paths)
+        ? data.paths.filter((path): path is number[] => Array.isArray(path)).map((path) =>
+            path.filter((part): part is number => Number.isInteger(part) && Number(part) >= 0).slice(0, 64),
+          ).filter((path) => path.length > 0).slice(0, 500)
+        : [];
+      manualDeckSelector = "";
+      manualSiblingPath = [];
+      forceTimeline = false;
+      publishDeck();
+    }
+
+    if (data.command === "set-outline-hidden") {
+      setOutlineFlag(data, "data-wysiwyg-editor-hidden");
+    }
+
+    if (data.command === "set-outline-locked") {
+      setOutlineFlag(data, "data-wysiwyg-editor-locked");
+    }
+
+    if (data.command === "set-picking-ignored") {
+      setOutlineFlag(data, "data-wysiwyg-editor-pick-through");
     }
 
     if (data.command === "select" && data.id) {
@@ -2734,7 +3269,8 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   win.addEventListener(
     "scroll",
     () => {
-      scheduleDeckPublish();
+      win.cancelAnimationFrame(activeScrollFrame);
+      activeScrollFrame = win.requestAnimationFrame(publishActiveFromViewport);
       updateChip();
     },
     true,
@@ -2744,6 +3280,54 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
     updateChip();
   });
 
+  if (document.body && typeof win.MutationObserver === "function") {
+    deckObserver = new win.MutationObserver((records) => {
+      const impact = combineMutationImpacts(records.map((record) => classifyBridgeMutation(record, SLIDE_SELECTOR, activeSlideId)));
+      if (impact === "irrelevant") return;
+      const handledEditorTargets = new Set<Element>();
+      if (impact === "deck-structural" || impact === "thumbnail-affecting") records.forEach((record) => {
+        const target = record.target instanceof win.Element ? record.target : record.target.parentElement;
+        let editorTarget: Element | null = target || null;
+        while (editorTarget && !editorMutatedElements.has(editorTarget)) editorTarget = editorTarget.parentElement;
+        if (editorTarget) {
+          handledEditorTargets.add(editorTarget);
+          return;
+        }
+        const slide = target?.closest(SLIDE_SELECTOR);
+        if (slide) invalidateThumbnail(slide, `observer:${record.type}:${record.attributeName || ""}`);
+      });
+      handledEditorTargets.forEach((target) => editorMutatedElements.delete(target));
+      if (selectedElement && !document.documentElement.contains(selectedElement)) {
+        selectedElement = null;
+        publishSelected();
+      }
+      scheduleDeckPublish();
+      if (impact === "deck-structural") scheduleOutlinePublish();
+    });
+    deckObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+      attributeFilter: [
+        "id",
+        "class",
+        "style",
+        "data-title",
+        "data-section",
+        "data-slide",
+        "data-slide-id",
+        "data-page",
+        "data-page-id",
+        "aria-label",
+        "aria-roledescription",
+        "aria-current",
+        "data-active",
+        "hidden",
+      ],
+    });
+  }
+
   syncFenceState();
   document.documentElement.setAttribute("data-wysiwyg-mode", mode);
   post("wysiwyg-ready", {
@@ -2752,4 +3336,5 @@ export function installEditorBridge(win: CosmicWindow = window as CosmicWindow) 
   });
   publishDeck();
   publishAudit();
+  publishOutline();
 }
