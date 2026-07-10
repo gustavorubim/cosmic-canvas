@@ -28,7 +28,7 @@ Use it when you want to:
 - Save edits back to the opened file (File System Access API, with download fallback).
 - Autosave a recovery draft and offer to restore it after an accidental tab close.
 - Render the HTML in a sandboxed iframe.
-- Click rendered elements to select them, and walk the element tree with a breadcrumb / Select parent.
+- Click rendered elements to select them, Alt-click to cycle ancestors, or use the virtualized full-document Outline.
 - Edit text inline or through the inspector (guarded so container elements are not flattened).
 - Add and remove CSS classes on the selected element.
 - Replace images by URL or by uploading a local file.
@@ -41,7 +41,7 @@ Use it when you want to:
 - Export detected HTML presentations to PowerPoint in Hybrid, Editable, or Exact image mode.
 - Preview desktop, tablet, and mobile widths.
 - Hide or show the source panel when you want a larger visual workspace.
-- Navigate detected slide decks with a bottom timeline and previous/next controls.
+- Navigate detected decks from the independent collapsible Pages panel, with automatic, forced, CSS-selector, selected-sibling, and manually marked-page recovery modes saved per document.
 - Insert a new slide after the active slide or duplicate the current slide.
 - Edit small CSV/TSV datasets in the Data panel and insert them as styled HTML tables.
 - Optional trusted-script mode for JavaScript-driven animations.
@@ -75,7 +75,7 @@ flowchart LR
   Preview --> Export["Copy or download clean HTML or PPTX"]
 ```
 
-The editing loop uses browser messages between the app shell and the iframe. Visual edits update the rendered document first, then the app cleans and stores the resulting HTML source.
+The editing loop uses session-scoped browser messages between the app shell and the iframe. Routine text, style, and class edits are applied to stable source ranges; structural changes deliberately fall back to clean full-document serialization. In VS Code, reliable operations become targeted workspace edits so unrelated formatting and the source cursor are preserved.
 
 ```mermaid
 sequenceDiagram
@@ -90,9 +90,10 @@ sequenceDiagram
   App->>Frame: Prepare editable preview
   Frame-->>App: Ready message
   User->>Frame: Select, edit, move, or duplicate element
-  Frame-->>App: Selection and document-change messages
-  App->>Cleaner: Remove editor-only metadata
-  Cleaner-->>App: Updated clean source
+  Frame-->>App: Session-token selection or typed operation
+  App->>App: Apply operation to structural source range
+  App->>Cleaner: Full cleanup only for recovery/export
+  Cleaner-->>App: Verified clean source
   User->>App: Copy or download
 ```
 
@@ -132,12 +133,12 @@ flowchart TD
 1. Paste HTML into the source panel or use **Open file** to load a local document.
 2. Click **Apply source** to render the latest source changes.
 3. Choose a mode:
-   - **Text** for direct text editing.
+   - **Text** to select with one click and edit text with a double-click or Enter.
    - **Select** for picking elements and changing styles.
    - **Move** for dragging or nudging selected elements.
    - **Preview** for viewing the page without editor selection behavior.
 4. Use the inspector to adjust content, color, spacing, size, alignment, and shape.
-5. For slide decks, use the timeline to move between slides, duplicate a slide, or insert a new slide.
+5. For slide decks, use the Pages navigator to move, duplicate, insert, rename, delete, reorder, or recover pages with a selector/sibling/manual-page rule.
 6. Use the Data panel to paste or edit CSV/TSV data, then insert it as a table into the active slide or page.
 7. Preview the result at desktop, tablet, and mobile widths.
 8. Copy or download the cleaned HTML, or export a detected presentation as PowerPoint.
@@ -174,6 +175,15 @@ Element shortcuts apply when the selected element has focus inside the preview a
 By default, Cosmic Canvas keeps pasted scripts and inline event handlers inert while editing. That makes visual editing safer and more predictable for random or AI-generated HTML.
 
 Enable **Trusted scripts** only for documents you trust and need to run, such as local demos or animated HTML presentations. When enabled, pasted JavaScript can execute inside the preview sandbox.
+
+The sandbox matrix is intentional:
+
+| Host | Untrusted document | Trusted document |
+| --- | --- | --- |
+| Browser | Author scripts/handlers inert; opaque-origin `allow-scripts allow-downloads` | Author scripts enabled; opaque-origin `allow-scripts allow-downloads` |
+| VS Code | Author scripts/handlers inert; opaque-origin `allow-scripts allow-downloads` | Author scripts enabled; opaque-origin `allow-scripts allow-downloads` |
+
+Every preview revision receives a new random bridge token. Messages with a wrong source, stale/missing token, malformed payload, or oversized document body are ignored. Wildcard `postMessage` targets remain necessary because sandboxed trusted/VS Code previews have opaque origins; source and token checks provide the receiver-side boundary.
 
 ## Local Development
 
@@ -213,19 +223,32 @@ Cosmic Canvas can also run as a VS Code custom editor for `.html` and `.htm` fil
 npm run vsix
 ```
 
-The packaged extension is written to `cosmic-canvas-0.1.1.vsix`. Install it with:
+The packaged extension uses the version from `package.json`, for example
+`cosmic-canvas-<version>.vsix`. Install the file produced by the build with:
 
 ```powershell
-code --install-extension .\cosmic-canvas-0.1.1.vsix
+$vsix = Get-ChildItem .\cosmic-canvas-*.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+code --install-extension $vsix.FullName
 ```
 
 After installation, open an HTML file with **Open With... > Cosmic Canvas** or run
 **Cosmic Canvas: Open Current HTML File** from the command palette.
 
+The running version is shown beside the Cosmic Canvas name and in the **Status** panel.
+Use **Copy diagnostics** there when comparing behavior across computers; it records
+versions, host mode, bridge state, and compatibility warnings without copying document
+contents.
+
+Distribution is GitHub-release-only for now. The app checks the repository's latest release at most once per day and shows a small notice when a newer version is available. Release candidates are built once and published with a SHA-256 file; use the same VSIX hash when comparing computers.
+
 ## Tests
 
 ```powershell
 npm test
+npm run test:browser
+npm run test:extension
+npm run test:perf
+npm run verify:package
 ```
 
 Unit tests (Vitest + jsdom) cover the CSV parser/serializer and the HTML
@@ -233,6 +256,10 @@ normalization, editor-bridge injection, script-inerting, and clean-export
 round-trips in `src/htmlDocument.ts`. PPTX tests cover slide extraction,
 unsupported CSS reporting, raster fallback behavior, inline SVG fallback, and
 basic `.pptx` blob generation.
+
+The committed browser suite exercises the real app/iframe bridge, CSP recovery, explicit editing, delayed and manual deck detection, 60-page virtualization, outline selection, incremental history, and trusted-script spoof resistance. The extension-host suite opens the built custom editor in VS Code, waits for both readiness layers, applies a guarded range edit, saves, closes, and reopens. The performance suite writes environment metadata and budgets to ignored `tmp/verification/performance/latest.json`.
+
+Use `npm run verify:release` for the full local release gate. CI additionally runs Firefox/WebKit and VS Code `1.90`/stable matrices.
 
 The PowerPoint visual harness compares rendered HTML slides against rendered
 PPTX pages and writes PNG diffs under `tmp/pptx/fidelity/`.
@@ -280,7 +307,7 @@ http://127.0.0.1:5173/?load=/stress-fixtures/large-scripted-100000.html&trusted=
 
 ## Known Limits
 
-- Relative assets from local files, such as `./images/foo.png`, do not automatically come along when you paste HTML. Use absolute URLs, inline assets, or keep the document self-contained.
+- Browser paste has no safe local directory authority, so relative assets are reported as unresolved. Opening a file in the VS Code custom editor grants only that document directory as a resource root and resolves sibling HTML, CSS, image, media, font, and module references from it.
 - Trusted-script mode executes pasted JavaScript inside the sandboxed preview. It is useful for your own generated HTML, but it should not be used for untrusted documents.
 - Runtime DOM changes made by a document's own scripts may affect what gets exported after visual edits.
 - Moving elements is designed for practical visual adjustments, not full responsive layout design.
@@ -290,40 +317,16 @@ http://127.0.0.1:5173/?load=/stress-fixtures/large-scripted-100000.html&trusted=
 
 Cosmic Canvas is released under the [MIT License](LICENSE).
 
-## Project Direction
+## Release and rollback
 
-Cosmic Canvas is aiming to become a friendly, free editor for everyday HTML polish. Good next additions:
+Build one candidate and checksum it:
 
-- Add a full element-tree panel (the inspector breadcrumb is a first step).
-- Add reusable page and presentation blocks.
-- Improve deck-aware editing for HTML slide decks.
-- Surface the selected element's source location in the code editor.
-- Offer a minimal-diff export mode that preserves original formatting.
+```powershell
+npm ci
+npm run verify:release
+npm run vsix:release
+npm run verify:package -- --require-vsix
+Get-Content .\cosmic-canvas-*.vsix.sha256
+```
 
-## Deck Editing Roadmap
-
-For HTML presentations such as the corporate deck example, the friendliest path is to add deck-aware tools on top of the existing visual editor:
-
-1. **Deck navigator**
-   - Detect repeated slide containers such as `section.slide`.
-   - Add previous/next slide buttons.
-   - Show a compact slide list with titles from `data-title`, `data-section`, or headings.
-   - Let users duplicate, delete, reorder, and rename slides.
-
-2. **Insert slide**
-   - Add a button that creates a new slide after the current one.
-   - Start with simple templates: title, title/body, metrics, chart placeholder, image/text, comparison table, agenda, closing.
-   - Match the current deck's classes where possible instead of injecting unrelated styling.
-
-3. **Component library**
-   - Provide drag/drop or click-to-insert blocks: KPI cards, callouts, tables, quote blocks, timelines, Mermaid diagrams, chart canvases, and image frames.
-   - Keep inserted blocks as normal HTML so the final export remains portable.
-
-4. **Data-assisted blocks**
-   - Add a small data panel for pasted CSV/JSON.
-   - Bind data to reusable chart/table components.
-   - Keep generated data blocks editable as regular DOM elements.
-
-5. **Safer export**
-   - Track inserted editor-created slides/components.
-   - Offer a clean export that keeps user content and removes editor-only metadata.
+Install that exact artifact on each test machine. If a release fails a required environment, stop distribution, retain the failing diagnostics/performance JSON, reinstall the previous GitHub release by its recorded SHA-256, and publish a rollback note identifying the affected version and verifier. Never rebuild a candidate separately per machine.

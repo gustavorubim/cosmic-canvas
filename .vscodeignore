@@ -1,5 +1,7 @@
 .git/**
 .vscode/**
+.vscode-test/**
+.github/**
 .gitignore
 node_modules/**
 src/**
@@ -13,6 +15,16 @@ vitest.config.ts
 tsconfig.json
 tsconfig.extension.json
 public/**
+docs/**
+fixtures/**
+output/**
+tmp/**
+test-results/**
+playwright-report/**
+plan.md
+tests/**
+playwright*.config.*
+*.vsix.sha256
 dist/**/*.map
 
 dist/**

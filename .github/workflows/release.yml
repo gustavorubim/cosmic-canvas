@@ -1,0 +1,29 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-once:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:browser
+      - run: npm run test:extension
+      - run: npm run test:perf
+      - run: npm run vsix:release
+      - run: npm run verify:package -- --require-vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmic-canvas-release-candidate
+          path: |
+            cosmic-canvas-*.vsix
+            cosmic-canvas-*.vsix.sha256
