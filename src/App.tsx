@@ -1,5 +1,5 @@
 import { ChevronRight, X } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, type ChangeEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   DECK_HINT_MESSAGE,
   hostDocumentChangeDelay,
@@ -8,14 +8,15 @@ import {
   shouldInstallBeforeUnload,
   shouldShowDeckHint,
 } from "./appPolicies";
+import { createBridgeSessionToken } from "./bridgeSession";
 import { CheckpointPanel } from "./components/CheckpointPanel";
 import { DataPanel } from "./components/DataPanel";
-import { DeckTimeline } from "./components/DeckTimeline";
+import { DeckNavigator } from "./components/DeckNavigator";
+import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { FindPanel } from "./components/FindPanel";
 import { Inspector, InspectorEmpty } from "./components/Inspector";
-import { LayerPanel } from "./components/LayerPanel";
+import { OutlinePanel } from "./components/OutlinePanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
-import { SourcePane } from "./components/SourcePane";
 import { Toolbar } from "./components/Toolbar";
 import { Topbar } from "./components/Topbar";
 import { ValidationPanel } from "./components/ValidationPanel";
@@ -31,16 +32,34 @@ import {
   serializeDataRows,
 } from "./csv";
 import { type DraftRecord, draftIdFor, readDrafts, removeDraft, saveDraft } from "./drafts";
+import { applySourceOperation, type AppliedSourceOperation } from "./editOperations";
+import {
+  DEFAULT_DECK_PREFERENCE,
+  type DeckPreference,
+  readDeckPreference,
+  saveDeckPreference,
+} from "./deckPreferences";
+import {
+  BRIDGE_READY_TIMEOUT_MS,
+  type PreviewStatus,
+  type RuntimeDiagnostics,
+  appendPreviewDiagnostic,
+  beginPreview,
+  markPreviewReady,
+  markPreviewTimedOut,
+  previewStateLabel,
+  withVersionMismatch,
+} from "./diagnostics";
 import {
   cleanEditorHtml,
   createPrintHtml,
   createSelfContainedHtml,
   normalizeHtmlInput,
   normalizeDeckHtml,
+  inlineTrustedModuleEntrypoints,
   prepareEditableHtml,
   SAMPLE_HTML,
 } from "./htmlDocument";
-import { exportPowerPoint } from "./pptx/exportPowerPoint";
 import { summarizePptxExportReport } from "./pptx/exportReport";
 import type { PptxExportMode, PptxExportReport } from "./pptx/types";
 import {
@@ -51,14 +70,16 @@ import {
   type ChartType,
   type ImageFitMode,
   type InlineFormatAction,
-  type LayerItem,
   type LayoutAction,
+  type OutlineItem,
   type SelectedElement,
   type SlideTemplateKind,
   type Viewport,
   type ZOrderAction,
 } from "./protocol";
 import { KEYBOARD_SHORTCUTS } from "./shortcuts";
+import { checkForUpdate } from "./updateCheck";
+import { applyPreviewResourceMap, buildBrowserResourceMap } from "./resourceResolver";
 import { getVsCodeApi, isVsCodeHostMessage } from "./vscodeBridge";
 
 type HistoryState = {
@@ -66,13 +87,23 @@ type HistoryState = {
   index: number;
 };
 
-type PreviewStatus = {
-  state: "loading" | "ready";
-  title: string;
-  bodyTextStart: string;
-};
+type SidePanel =
+  | "inspect"
+  | "data"
+  | "audit"
+  | "find"
+  | "outline"
+  | "checkpoints"
+  | "shortcuts"
+  | "diagnostics";
 
-type SidePanel = "inspect" | "data" | "audit" | "find" | "layers" | "checkpoints" | "shortcuts";
+type HostInfo = {
+  extensionVersion: string;
+  vscodeVersion: string;
+  fileName: string;
+  uri: string;
+  baseUri: string;
+};
 
 type Toast = {
   id: number;
@@ -93,6 +124,10 @@ const modeLabels: Record<EditorMode, string> = {
 };
 
 const modeOrder: EditorMode[] = ["text", "select", "move", "preview"];
+const APP_VERSION = __COSMIC_CANVAS_VERSION__;
+const SourcePane = lazy(() =>
+  import("./components/SourcePane").then((module) => ({ default: module.SourcePane })),
+);
 
 const pptxModeLabels: Record<PptxExportMode, string> = {
   hybrid: "Hybrid",
@@ -102,6 +137,15 @@ const pptxModeLabels: Record<PptxExportMode, string> = {
 
 const supportsFileSystemAccess =
   typeof window !== "undefined" && typeof (window as any).showSaveFilePicker === "function";
+
+function recordShellTiming(name: "sourceCleanup" | "hostUpdate", startedAt: number) {
+  if (!import.meta.env.DEV || typeof window === "undefined") return;
+  const host = window as Window & { __cosmicShellMetrics?: Record<string, number[]> };
+  const metrics = host.__cosmicShellMetrics || (host.__cosmicShellMetrics = {});
+  const values = metrics[name] || (metrics[name] = []);
+  values.push(Math.max(0, performance.now() - startedAt));
+  if (values.length > 200) values.shift();
+}
 
 function fileNameFromDate() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -114,8 +158,11 @@ function pptxFileNameFromDate(mode: PptxExportMode) {
 }
 
 function normalizeEditableSource(html: string) {
+  const startedAt = typeof performance === "undefined" ? 0 : performance.now();
   const normalized = normalizeHtmlInput(html);
-  return normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+  const clean = normalized.includes("data-wysiwyg-") ? cleanEditorHtml(normalized) : normalized;
+  if (startedAt) recordShellTiming("sourceCleanup", startedAt);
+  return clean;
 }
 
 async function blobToBase64(blob: Blob) {
@@ -139,27 +186,58 @@ export default function App() {
   const historyRef = useRef<HistoryState>({ stack: [initialHtml], index: 0 });
   const pendingHistoryTimer = useRef<number>();
   const pendingHostChangeTimer = useRef<number>();
+  const pendingHostEditRef = useRef<{
+    from: number;
+    to: number;
+    text: string;
+    expected: string;
+    key: string;
+    html: string;
+    reason: string;
+  } | null>(null);
+  const documentBaseUriRef = useRef("");
   const fileHandleRef = useRef<any>(null);
   const sourceHtmlRef = useRef(initialHtml);
   const lastScrollRef = useRef({ x: 0, y: 0 });
   const pendingScrollRef = useRef<{ x: number; y: number } | null>(null);
   const toastIdRef = useRef(0);
   const deckHintShownRef = useRef(false);
+  const navigatorAutoOpenedRef = useRef(false);
+  const previewRevisionRef = useRef(0);
+  const sourceEditRevisionRef = useRef(0);
+  const bridgeSessionRef = useRef(createBridgeSessionToken());
   const draftIdRef = useRef(draftIdFor("sample", initialHtml));
   const draftTitleRef = useRef("Sample document");
+  const initialDeckPreferenceRef = useRef<DeckPreference>(
+    typeof localStorage === "undefined"
+      ? DEFAULT_DECK_PREFERENCE
+      : readDeckPreference(localStorage, draftIdRef.current),
+  );
+  const deckPreferenceRef = useRef(initialDeckPreferenceRef.current);
 
   const [sourceHtml, setSourceHtml] = useState(initialHtml);
   const [appliedHtml, setAppliedHtml] = useState(initialHtml);
-  const [frameHtml, setFrameHtml] = useState(() => prepareEditableHtml(initialHtml));
+  const [frameHtml, setFrameHtml] = useState(() =>
+    prepareEditableHtml(initialHtml, false, "", bridgeSessionRef.current),
+  );
   const [selected, setSelected] = useState<SelectedElement | null>(null);
   const [mode, setMode] = useState<EditorMode>("text");
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [runTrustedScripts, setRunTrustedScripts] = useState(false);
-  const [forceTimeline, setForceTimeline] = useState(false);
+  const [deckPreference, setDeckPreference] = useState(initialDeckPreferenceRef.current);
+  const [forceTimeline, setForceTimeline] = useState(initialDeckPreferenceRef.current.mode === "force");
+  const [navigatorCollapsed, setNavigatorCollapsed] = useState(true);
   const [sourceVisible, setSourceVisible] = useState(true);
+  const [sourceIncrementalEdit, setSourceIncrementalEdit] = useState<{
+    revision: number;
+    from: number;
+    to: number;
+    text: string;
+  } | null>(null);
   const [deckSlides, setDeckSlides] = useState<DeckSlide[]>([]);
   const [auditFindings, setAuditFindings] = useState<AuditFinding[]>([]);
-  const [layers, setLayers] = useState<LayerItem[]>([]);
+  const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
+  const [outlineTruncated, setOutlineTruncated] = useState(false);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [checkpointName, setCheckpointName] = useState("");
   const [findQuery, setFindQuery] = useState("");
@@ -169,17 +247,19 @@ export default function App() {
   const [sidePanel, setSidePanel] = useState<SidePanel>("inspect");
   const [dataTitle, setDataTitle] = useState("Launch metrics");
   const [dataRows, setDataRows] = useState(() => DEFAULT_DATA_ROWS.map((row) => [...row]));
-  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({
-    state: "loading",
-    title: "",
-    bodyTextStart: "",
+  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>(() => beginPreview(0, initialHtml));
+  const [hostInfo, setHostInfo] = useState<HostInfo>({
+    extensionVersion: "",
+    vscodeVersion: "",
+    fileName: "",
+    uri: "",
+    baseUri: "",
   });
   const [historyState, setHistoryState] = useState<HistoryState>(historyRef.current);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [draftPrompt, setDraftPrompt] = useState<DraftRecord[]>([]);
   const [pptxReport, setPptxReport] = useState<PptxExportReport | null>(null);
   const [pptxExportingMode, setPptxExportingMode] = useState<PptxExportMode | null>(null);
-
   sourceHtmlRef.current = sourceHtml;
 
   const canUndo = historyState.index > 0;
@@ -191,6 +271,19 @@ export default function App() {
   );
   const dataText = useMemo(() => serializeDataRows(dataRows), [dataRows]);
   const dataColumnCount = Math.max(1, dataRows[0]?.length ?? 1);
+  const runtimeDiagnostics: RuntimeDiagnostics = {
+    appVersion: APP_VERSION,
+    hostMode: isVsCode ? "VS Code" : "Browser",
+    extensionVersion: hostInfo.extensionVersion,
+    vscodeVersion: hostInfo.vscodeVersion,
+    browserEngine: typeof navigator === "undefined" ? "" : navigator.userAgent,
+    fileName: hostInfo.fileName || draftTitleRef.current,
+    uri: hostInfo.uri,
+    baseUri: hostInfo.baseUri,
+    trustedScripts: runTrustedScripts,
+    forceTimeline,
+    preview: previewStatus,
+  };
 
   function showToast(message: string) {
     const id = ++toastIdRef.current;
@@ -221,14 +314,58 @@ export default function App() {
     pendingHistoryTimer.current = window.setTimeout(() => pushHistory(html), 450);
   }
 
+  function flushPendingHistory() {
+    if (!pendingHistoryTimer.current) return;
+    window.clearTimeout(pendingHistoryTimer.current);
+    pendingHistoryTimer.current = undefined;
+    pushHistory(sourceHtmlRef.current);
+  }
+
+  function cancelPendingHostEdit() {
+    if (pendingHostChangeTimer.current) window.clearTimeout(pendingHostChangeTimer.current);
+    pendingHostChangeTimer.current = undefined;
+    pendingHostEditRef.current = null;
+  }
+
+  function flushPendingHostEdit() {
+    if (!vscodeApi || !pendingHostEditRef.current) return;
+    const pending = pendingHostEditRef.current;
+    pendingHostEditRef.current = null;
+    pendingHostChangeTimer.current = undefined;
+    const startedAt = performance.now();
+    vscodeApi.postMessage({
+      type: "documentEdit",
+      from: pending.from,
+      to: pending.to,
+      text: pending.text,
+      expected: pending.expected,
+      fallbackHtml: pending.html,
+      reason: pending.reason,
+    });
+    recordShellTiming("hostUpdate", startedAt);
+  }
+
+  function postHostSourceEdit(applied: AppliedSourceOperation, html: string, reason: string) {
+    if (!vscodeApi) return;
+    const edit = applied.edit;
+    const pending = pendingHostEditRef.current;
+    if (pending && pending.key !== edit.key) flushPendingHostEdit();
+    const current = pendingHostEditRef.current;
+    pendingHostEditRef.current = current
+      ? { ...current, text: edit.text, html, reason }
+      : { ...edit, html, reason };
+    if (pendingHostChangeTimer.current) window.clearTimeout(pendingHostChangeTimer.current);
+    pendingHostChangeTimer.current = window.setTimeout(flushPendingHostEdit, hostDocumentChangeDelay(reason));
+  }
+
   function postHostDocumentChange(html: string, reason: string, immediate = false) {
     if (!vscodeApi) return;
-    if (pendingHostChangeTimer.current) {
-      window.clearTimeout(pendingHostChangeTimer.current);
-    }
+    cancelPendingHostEdit();
 
     const post = () => {
+      const startedAt = performance.now();
       vscodeApi.postMessage({ type: "documentChanged", html, reason });
+      recordShellTiming("hostUpdate", startedAt);
     };
 
     if (immediate) {
@@ -238,28 +375,51 @@ export default function App() {
     }
   }
 
-  function renderHtml(html: string, trustedScripts = runTrustedScripts) {
-    setPreviewStatus({ state: "loading", title: "", bodyTextStart: "" });
+  function renderHtml(
+    html: string,
+    trustedScripts = runTrustedScripts,
+    baseUri = documentBaseUriRef.current,
+    previewHtml = html,
+  ) {
+    flushPendingHistory();
+    flushPendingHostEdit();
+    if (html.length > 1_000_000) setSourceVisible(false);
+    documentBaseUriRef.current = baseUri;
+    const revision = ++previewRevisionRef.current;
+    setPreviewStatus(beginPreview(revision, html, baseUri));
     setDeckSlides([]);
     setAuditFindings([]);
     setActiveSlideId("");
     setPptxReport(null);
     deckHintShownRef.current = false;
     setAppliedHtml(html);
-    setFrameHtml(prepareEditableHtml(html, trustedScripts));
+    setSourceIncrementalEdit(null);
+    bridgeSessionRef.current = createBridgeSessionToken();
+    setFrameHtml(prepareEditableHtml(previewHtml, trustedScripts, baseUri, bridgeSessionRef.current));
     setSelected(null);
   }
 
   function setDraftContext(title: string, html: string) {
     draftTitleRef.current = title || "Untitled document";
     draftIdRef.current = draftIdFor(draftTitleRef.current, html);
+    const preference = readDeckPreference(localStorage, draftIdRef.current);
+    deckPreferenceRef.current = preference;
+    setDeckPreference(preference);
+    setForceTimeline(preference.mode === "force");
   }
 
-  function loadHtml(html: string, addToHistory = true, trustedScripts = runTrustedScripts, title?: string) {
+  function loadHtml(
+    html: string,
+    addToHistory = true,
+    trustedScripts = runTrustedScripts,
+    title?: string,
+    baseUri = documentBaseUriRef.current,
+    previewHtml?: string,
+  ) {
     const clean = normalizeEditableSource(html);
     if (title) setDraftContext(title, clean);
     setSourceHtml(clean);
-    renderHtml(clean, trustedScripts);
+    renderHtml(clean, trustedScripts, baseUri, previewHtml || clean);
     if (addToHistory) pushHistory(clean);
   }
 
@@ -269,11 +429,11 @@ export default function App() {
     postHostDocumentChange(clean, "apply-source", true);
   }
 
-  function loadHostDocument(html: string) {
+  function loadHostDocument(html: string, baseUri: string, resources: Record<string, string>) {
     const clean = normalizeEditableSource(html);
     setDraftContext("VS Code document", clean);
     setSourceHtml(clean);
-    renderHtml(clean);
+    renderHtml(clean, runTrustedScripts, baseUri, applyPreviewResourceMap(clean, resources));
     syncHistoryState({ stack: [clean], index: 0 });
   }
 
@@ -284,7 +444,7 @@ export default function App() {
 
   function postCommand(command: string, payload: Record<string, unknown> = {}) {
     iframeRef.current?.contentWindow?.postMessage(
-      { type: "wysiwyg-command", command, ...payload },
+      { type: "wysiwyg-command", command, ...payload, sessionToken: bridgeSessionRef.current },
       "*",
     );
   }
@@ -461,6 +621,7 @@ export default function App() {
   }
 
   function stepHistory(offset: number) {
+    flushPendingHistory();
     const current = historyRef.current;
     const nextIndex = current.index + offset;
     if (nextIndex < 0 || nextIndex >= current.stack.length) return;
@@ -477,9 +638,74 @@ export default function App() {
     renderHtml(sourceHtml, enabled);
   }
 
+  function postDeckPreference(preference: DeckPreference) {
+    if (preference.mode === "selector") {
+      postCommand("set-deck-selector", { selector: preference.selector });
+      return;
+    }
+    if (preference.mode === "siblings") {
+      postCommand("set-deck-from-selection", { siblingPath: preference.siblingPath });
+      return;
+    }
+    if (preference.mode === "marked") {
+      postCommand("set-deck-marked", { paths: preference.markedPaths || [] });
+      return;
+    }
+    if (preference.mode === "force") {
+      postCommand("set-force-timeline", { enabled: true });
+      return;
+    }
+    postCommand("clear-deck-override");
+  }
+
+  function applyDeckPreference(preference: DeckPreference) {
+    deckPreferenceRef.current = preference;
+    setDeckPreference(preference);
+    setForceTimeline(preference.mode === "force");
+    try {
+      saveDeckPreference(localStorage, draftIdRef.current, preference);
+    } catch {
+      // Storage can be disabled in hardened browser profiles; the current session still works.
+    }
+    postDeckPreference(preference);
+  }
+
   function toggleForceTimeline(enabled: boolean) {
-    setForceTimeline(enabled);
-    postCommand("set-force-timeline", { enabled });
+    applyDeckPreference(enabled ? { mode: "force", selector: "" } : DEFAULT_DECK_PREFERENCE);
+  }
+
+  function applyDeckSelector(selector: string) {
+    const cleanSelector = selector.trim().slice(0, 500);
+    if (!cleanSelector) {
+      applyDeckPreference(DEFAULT_DECK_PREFERENCE);
+      return;
+    }
+    applyDeckPreference({ mode: "selector", selector: cleanSelector });
+  }
+
+  function useSelectedSiblingsAsDeck() {
+    if (!selected) {
+      showToast("Select an element inside a page first.");
+      return;
+    }
+    applyDeckPreference({ mode: "siblings", selector: "" });
+  }
+
+  function toggleSelectedDeckPage() {
+    const path = selected?.sourcePath;
+    if (!path?.length) {
+      showToast("Select the page container you want to mark first.");
+      return;
+    }
+    const key = path.join(".");
+    const current = deckPreference.mode === "marked" ? deckPreference.markedPaths || [] : [];
+    const exists = current.some((candidate) => candidate.join(".") === key);
+    const markedPaths = exists
+      ? current.filter((candidate) => candidate.join(".") !== key)
+      : [...current, path];
+    applyDeckPreference(markedPaths.length
+      ? { mode: "marked", selector: "", markedPaths }
+      : DEFAULT_DECK_PREFERENCE);
   }
 
   async function openFile() {
@@ -496,7 +722,7 @@ export default function App() {
         });
         fileHandleRef.current = handle;
         const file = await handle.getFile();
-        loadHtml(await file.text(), true, runTrustedScripts, file.name);
+        loadHtml(await file.text(), true, runTrustedScripts, file.name, "");
         showToast(`Opened ${file.name}`);
         return;
       } catch (error) {
@@ -511,7 +737,7 @@ export default function App() {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
     fileHandleRef.current = null;
-    loadHtml(await file.text(), true, runTrustedScripts, file.name);
+    loadHtml(await file.text(), true, runTrustedScripts, file.name, "");
     showToast(`Opened ${file.name}`);
     event.currentTarget.value = "";
   }
@@ -578,6 +804,19 @@ export default function App() {
     showToast("HTML copied to clipboard");
   }
 
+  async function copyDiagnosticsText(text: string) {
+    try {
+      if (vscodeApi) {
+        vscodeApi.postMessage({ type: "copyText", text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        showToast("Diagnostics copied to clipboard");
+      }
+    } catch {
+      showToast("Unable to copy diagnostics");
+    }
+  }
+
   function downloadHtml() {
     const clean = cleanEditorHtml(sourceHtmlRef.current);
     if (vscodeApi) {
@@ -627,6 +866,7 @@ export default function App() {
     setPptxReport(null);
     try {
       showToast(`Preparing PowerPoint ${pptxModeLabels[mode]} export...`);
+      const { exportPowerPoint } = await import("./pptx/exportPowerPoint");
       const result = await exportPowerPoint({
         document: previewDocumentForExport(),
         html: sourceHtmlRef.current,
@@ -659,7 +899,7 @@ export default function App() {
 
   function restoreDraft(draft: DraftRecord) {
     setDraftContext(draft.title, draft.html);
-    loadHtml(draft.html);
+    loadHtml(draft.html, true, runTrustedScripts, draft.title, "");
     setDraftPrompt([]);
     showToast(`Draft restored: ${draft.title}`);
   }
@@ -679,16 +919,90 @@ export default function App() {
   const actionsRef = useRef({ saveToFile, applySource, stepHistory, setEditorMode });
   actionsRef.current = { saveToFile, applySource, stepHistory, setEditorMode };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     function onMessage(event: MessageEvent) {
-      if (event.source !== iframeRef.current?.contentWindow) return;
-      if (!isBridgeMessage(event.data)) return;
+      if (event.data?.type === "wysiwyg-probe") {
+        vscodeApi?.postMessage({
+          type: "bridgeStatus",
+          state: "loading",
+          codes: [event.source === iframeRef.current?.contentWindow ? "bridge-probe" : "bridge-probe-wrong-source"],
+        });
+        return;
+      }
+      if (event.data?.type === "wysiwyg-bridge-error") {
+        if (
+          event.source === iframeRef.current?.contentWindow &&
+          event.data?.sessionToken === bridgeSessionRef.current
+        ) {
+          setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+            id: "bridge-runtime-error",
+            code: "bridge-runtime-error",
+            severity: "error",
+            title: "Editing bridge crashed during startup",
+            message: String(event.data.message || "Unknown bridge runtime error"),
+          }));
+        }
+        vscodeApi?.postMessage({
+          type: "bridgeStatus",
+          state: "failed",
+          codes: ["bridge-runtime-error", String(event.data.message || "unknown")],
+        });
+      }
+      if (event.source !== iframeRef.current?.contentWindow) {
+        if (typeof event.data?.type === "string" && event.data.type.startsWith("wysiwyg-")) {
+          setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+            id: "bridge-source-rejected",
+            code: "bridge-source-rejected",
+            severity: "warning",
+            title: "Bridge message rejected",
+            message: "A protocol-shaped message came from outside the current preview and was ignored.",
+          }));
+        }
+        if (event.data?.type === "wysiwyg-ready") {
+          vscodeApi?.postMessage({ type: "bridgeStatus", state: "failed", codes: ["bridge-wrong-source"] });
+        }
+        return;
+      }
+      if (event.data?.sessionToken !== bridgeSessionRef.current) {
+        if (typeof event.data?.type === "string" && event.data.type.startsWith("wysiwyg-")) {
+          setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+            id: "bridge-session-rejected",
+            code: "bridge-session-rejected",
+            severity: "warning",
+            title: "Stale preview message rejected",
+            message: "A protocol-shaped message without the current preview token was ignored.",
+          }));
+        }
+        if (event.data?.type === "wysiwyg-ready") {
+          vscodeApi?.postMessage({ type: "bridgeStatus", state: "failed", codes: ["bridge-wrong-session"] });
+        }
+        return;
+      }
+      if (!isBridgeMessage(event.data)) {
+        if (typeof event.data?.type === "string" && event.data.type.startsWith("wysiwyg-")) {
+          setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+            id: "bridge-message-rejected",
+            code: "bridge-message-rejected",
+            severity: "warning",
+            title: "Malformed bridge message rejected",
+            message: `A ${String(event.data.type).slice(0, 80)} message failed payload validation and was ignored.`,
+          }));
+        }
+        return;
+      }
       const data = event.data;
 
       if (data.type === "wysiwyg-ready") {
-        setPreviewStatus({ state: "ready", title: data.title, bodyTextStart: data.bodyTextStart });
+        setPreviewStatus((current) =>
+          withVersionMismatch(
+            markPreviewReady(current, { title: data.title, bodyTextStart: data.bodyTextStart }),
+            APP_VERSION,
+            hostInfo.extensionVersion,
+          ),
+        );
+        vscodeApi?.postMessage({ type: "bridgeStatus", state: "ready" });
         postCommand("set-mode", { mode });
-        postCommand("set-force-timeline", { enabled: forceTimeline });
+        postDeckPreference(deckPreferenceRef.current);
         if (pendingScrollRef.current) {
           postCommand("scroll-to", pendingScrollRef.current);
           pendingScrollRef.current = null;
@@ -707,6 +1021,10 @@ export default function App() {
       if (data.type === "wysiwyg-deck") {
         setDeckSlides(data.slides);
         setActiveSlideId(data.activeId);
+        if (data.slides.length && !navigatorAutoOpenedRef.current) {
+          navigatorAutoOpenedRef.current = true;
+          setNavigatorCollapsed(false);
+        }
         if (shouldShowDeckHint(data.slides.length, deckHintShownRef.current)) {
           deckHintShownRef.current = true;
           showToast(DECK_HINT_MESSAGE);
@@ -714,7 +1032,12 @@ export default function App() {
       }
 
       if (data.type === "wysiwyg-layers") {
-        setLayers(data.layers);
+        // Retained for backward-compatible bridges; the full outline supersedes this sibling-only view.
+      }
+
+      if (data.type === "wysiwyg-outline") {
+        setOutlineItems(data.items);
+        setOutlineTruncated(data.truncated);
       }
 
       if (data.type === "wysiwyg-audit") {
@@ -724,6 +1047,25 @@ export default function App() {
       if (data.type === "wysiwyg-find") {
         setFindQuery(data.query);
         setFindCount(data.count);
+      }
+
+      if (data.type === "wysiwyg-deck-preference") {
+        const preference: DeckPreference = {
+          mode: "siblings",
+          selector: "",
+          siblingPath: data.siblingPath,
+        };
+        deckPreferenceRef.current = preference;
+        setDeckPreference(preference);
+        try {
+          saveDeckPreference(localStorage, draftIdRef.current, preference);
+        } catch {
+          // Keep the in-memory preference when storage is unavailable.
+        }
+      }
+
+      if (data.type === "wysiwyg-diagnostic") {
+        setPreviewStatus((current) => appendPreviewDiagnostic(current, data.diagnostic));
       }
 
       if (data.type === "wysiwyg-shortcut") {
@@ -737,10 +1079,45 @@ export default function App() {
       if (data.type === "wysiwyg-document-change") {
         lastScrollRef.current = { x: data.scrollX, y: data.scrollY };
         const clean = cleanEditorHtml(data.html);
+        sourceHtmlRef.current = clean;
         setSourceHtml(clean);
         setAppliedHtml(clean);
         scheduleHistory(clean);
         postHostDocumentChange(clean, data.reason, data.reason === "blur");
+      }
+
+      if (data.type === "wysiwyg-operation") {
+        lastScrollRef.current = { x: data.scrollX, y: data.scrollY };
+        const applied = applySourceOperation(sourceHtmlRef.current, data.operation);
+        if (!applied) {
+          setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+            id: "source-range-ambiguous",
+            code: "source-range-ambiguous",
+            severity: "warning",
+            title: "Incremental source range was ambiguous",
+            message: "Cosmic Canvas requested a clean full-document recovery for this edit.",
+          }));
+          postCommand("request-html");
+          return;
+        }
+        sourceHtmlRef.current = applied.source;
+        setSourceIncrementalEdit({
+          revision: ++sourceEditRevisionRef.current,
+          from: applied.edit.from,
+          to: applied.edit.to,
+          text: applied.edit.text,
+        });
+        setSourceHtml(applied.source);
+        setAppliedHtml(applied.source);
+        scheduleHistory(applied.source);
+        postHostSourceEdit(applied, applied.source, data.operation.reason);
+        setPreviewStatus((current) => appendPreviewDiagnostic(current, {
+          id: "incremental-operation",
+          code: "incremental-operation",
+          severity: "info",
+          title: "Incremental editing active",
+          message: "Applied " + data.operation.kind + " operation without serializing the full document.",
+        }));
       }
     }
 
@@ -749,7 +1126,13 @@ export default function App() {
       window.removeEventListener("message", onMessage);
       if (pendingHistoryTimer.current) window.clearTimeout(pendingHistoryTimer.current);
     };
-  }, [mode, forceTimeline]);
+  }, [mode, hostInfo.extensionVersion]);
+
+  useEffect(() => {
+    void checkForUpdate(APP_VERSION, localStorage).then((version) => {
+      if (version) showToast(`Cosmic Canvas ${version} is available on GitHub.`);
+    });
+  }, []);
 
   useEffect(() => {
     if (!vscodeApi) return;
@@ -759,11 +1142,37 @@ export default function App() {
       const data = event.data;
 
       if (data.type === "cosmicCanvas.document") {
-        loadHostDocument(data.html);
+        setHostInfo({
+          extensionVersion: data.extensionVersion,
+          vscodeVersion: data.vscodeVersion,
+          fileName: data.fileName,
+          uri: data.uri,
+          baseUri: data.baseUri,
+        });
+        loadHostDocument(data.html, data.baseUri, data.resources);
       }
 
       if (data.type === "cosmicCanvas.toast") {
         showToast(data.message);
+      }
+
+      if (data.type === "cosmicCanvas.hostEdit") {
+        setPreviewStatus((current) => appendPreviewDiagnostic(current, data.mode === "targeted"
+          ? {
+              id: "host-targeted-edit",
+              code: "host-targeted-edit",
+              severity: "info",
+              title: "VS Code range edit applied",
+              message: "The host updated only the affected source range.",
+            }
+          : {
+              id: "host-full-replace-fallback",
+              code: "host-full-replace-fallback",
+              severity: "warning",
+              title: "VS Code used full-document fallback",
+              message: "The source range changed before the edit could be applied.",
+              detail: data.reason,
+            }));
       }
     }
 
@@ -775,6 +1184,28 @@ export default function App() {
       if (pendingHostChangeTimer.current) window.clearTimeout(pendingHostChangeTimer.current);
     };
   }, [vscodeApi]);
+
+  useEffect(() => {
+    if (previewStatus.state !== "loading") return;
+    const revision = previewStatus.revision;
+    const timer = window.setTimeout(() => {
+      setPreviewStatus((current) =>
+        current.revision === revision ? markPreviewTimedOut(current) : current,
+      );
+    }, BRIDGE_READY_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [previewStatus.revision, previewStatus.state]);
+
+  useEffect(() => {
+    vscodeApi?.postMessage({
+      type: "bridgeStatus",
+      state: previewStatus.state,
+      codes: previewStatus.diagnostics.map((diagnostic) => diagnostic.code),
+      resourceFailures: previewStatus.diagnostics
+        .filter((diagnostic) => diagnostic.code === "resource-unavailable" || diagnostic.code === "resource-blocked")
+        .map((diagnostic) => diagnostic.detail || diagnostic.message),
+    });
+  }, [previewStatus.state, previewStatus.diagnostics, vscodeApi]);
 
   // Keyboard shortcuts handled at the app-shell level (focus outside the iframe).
   useEffect(() => {
@@ -855,16 +1286,37 @@ export default function App() {
     if (isVsCode) return;
 
     const params = new URLSearchParams(window.location.search);
-    const loadUrl = params.get("load");
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const loadUrl = params.get("load") || hashParams.get("load");
     if (loadUrl) {
-      const trusted = params.get("trusted") === "1";
+      const trusted = params.get("trusted") === "1" || hashParams.get("trusted") === "1";
       setRunTrustedScripts(trusted);
       fetch(loadUrl)
         .then((response) => {
           if (!response.ok) throw new Error(`Unable to load ${loadUrl}: ${response.status}`);
           return response.text();
         })
-        .then((html) => loadHtml(html, true, trusted, loadUrl))
+        .then(async (html) => {
+          let baseUri = hashParams.get("resourceBase") || "";
+          try {
+            const parsed = new URL(baseUri || loadUrl, window.location.href);
+            if (baseUri && parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+              baseUri = "";
+            } else if (baseUri) {
+              baseUri = parsed.toString();
+            } else if (!baseUri && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
+              baseUri = new URL(".", parsed).toString();
+            }
+          } catch {
+            // Invalid or opaque URLs have no usable relative-resource base.
+          }
+          const resourceMap = baseUri ? await buildBrowserResourceMap(html, baseUri) : {};
+          const mappedHtml = applyPreviewResourceMap(html, resourceMap);
+          const previewHtml = trusted && baseUri
+            ? await inlineTrustedModuleEntrypoints(mappedHtml, baseUri)
+            : mappedHtml;
+          loadHtml(html, true, trusted, loadUrl, baseUri, previewHtml);
+        })
         .catch((error: unknown) => console.error(error));
       return;
     }
@@ -885,6 +1337,7 @@ export default function App() {
   return (
     <main className="app-shell">
       <Topbar
+        version={APP_VERSION}
         fileInputRef={fileInputRef}
         onOpen={openFile}
         onOpenFile={openHtmlFile}
@@ -939,20 +1392,52 @@ export default function App() {
         </div>
       ) : null}
 
-      <section className={`workspace ${sourceVisible ? "" : "source-hidden"}`}>
-        <SourcePane
-          value={sourceHtml}
-          onChange={updateSourceHtml}
-          visible={sourceVisible}
-          onShow={() => setSourceVisible(true)}
-          dirty={sourceDirty}
-          onApply={applySource}
-          selected={selected}
+      <section
+        className={`workspace ${sourceVisible ? "" : "source-hidden"} ${navigatorCollapsed ? "navigator-collapsed" : ""}`}
+      >
+        <Suspense fallback={<aside className="source-pane source-loading">Loading HTML source...</aside>}>
+          <SourcePane
+            value={sourceHtml}
+            onChange={updateSourceHtml}
+            visible={sourceVisible}
+            onShow={() => setSourceVisible(true)}
+            dirty={sourceDirty}
+            onApply={applySource}
+            selected={selected}
+            incrementalEdit={sourceIncrementalEdit}
+          />
+        </Suspense>
+
+        <DeckNavigator
+          slides={deckSlides}
+          activeSlideId={activeSlideId}
+          activeSlideIndex={activeSlideIndex}
+          collapsed={navigatorCollapsed}
+          onCollapsed={setNavigatorCollapsed}
+          onForceTimeline={() => toggleForceTimeline(true)}
+          detectionMode={deckPreference.mode}
+          selector={deckPreference.selector}
+          canUseSelection={Boolean(selected)}
+          selectedIsMarked={Boolean(selected?.sourcePath && deckPreference.markedPaths?.some(
+            (path) => path.join(".") === selected.sourcePath?.join("."),
+          ))}
+          onApplySelector={applyDeckSelector}
+          onUseSelectedSiblings={useSelectedSiblingsAsDeck}
+          onToggleSelectedPage={toggleSelectedDeckPage}
+          onAutomaticDetection={() => applyDeckPreference(DEFAULT_DECK_PREFERENCE)}
+          onGoSlide={goToDeckSlide}
+          onStep={stepDeckSlide}
+          onDuplicate={duplicateCurrentSlide}
+          onInsert={insertSlideAfterCurrent}
+          onRename={renameDeckSlide}
+          onDelete={deleteCurrentSlide}
+          onMove={moveCurrentSlide}
+          onTemplate={insertSlideTemplate}
         />
 
         <section
           aria-label="Rendered HTML"
-          className={`preview-pane ${deckSlides.length ? "has-timeline" : ""}`}
+          className="preview-pane"
           data-mode={mode}
         >
           <div className="pane-title">
@@ -961,20 +1446,23 @@ export default function App() {
               <em className={`mode-badge mode-${mode}`}>{modeLabels[mode]}</em>
             </span>
             <span title={previewStatus.bodyTextStart || undefined}>
-              {previewStatus.state === "ready"
-                ? `${viewportLabels[viewport]} - ${previewStatus.title || "Ready"}`
-                : `${viewportLabels[viewport]} - Loading`}
+              {`${viewportLabels[viewport]} - ${previewStatus.title || previewStateLabel(previewStatus.state)}`}
             </span>
           </div>
           <div className={`preview-frame preview-frame-${viewport}`}>
+            {previewStatus.state === "failed" ? (
+              <div className="preview-failure" role="alert">
+                <strong>Editing bridge unavailable</strong>
+                <span>The page may still render, but selection and navigation are not connected.</span>
+                <button onClick={() => setSidePanel("diagnostics")} type="button">
+                  Open diagnostics
+                </button>
+              </div>
+            ) : null}
             <iframe
               ref={iframeRef}
               sandbox={
-                isVsCode
-                  ? "allow-scripts allow-downloads"
-                  : runTrustedScripts
-                    ? "allow-scripts allow-downloads"
-                    : "allow-scripts allow-same-origin allow-downloads"
+                "allow-scripts allow-downloads"
               }
               srcDoc={frameHtml}
               title="Editable HTML preview"
@@ -995,21 +1483,6 @@ export default function App() {
                 </span>
               ))}
             </nav>
-          ) : null}
-          {deckSlides.length ? (
-            <DeckTimeline
-              slides={deckSlides}
-              activeSlideId={activeSlideId}
-              activeSlideIndex={activeSlideIndex}
-              onGoSlide={goToDeckSlide}
-              onStep={stepDeckSlide}
-              onDuplicate={duplicateCurrentSlide}
-              onInsert={insertSlideAfterCurrent}
-              onRename={renameDeckSlide}
-              onDelete={deleteCurrentSlide}
-              onMove={moveCurrentSlide}
-              onTemplate={insertSlideTemplate}
-            />
           ) : null}
         </section>
 
@@ -1032,8 +1505,8 @@ export default function App() {
               <button aria-pressed={sidePanel === "find"} onClick={() => setSidePanel("find")} type="button">
                 Find
               </button>
-              <button aria-pressed={sidePanel === "layers"} onClick={() => setSidePanel("layers")} type="button">
-                Layers
+              <button aria-pressed={sidePanel === "outline"} onClick={() => setSidePanel("outline")} type="button">
+                Outline
               </button>
               <button
                 aria-pressed={sidePanel === "checkpoints"}
@@ -1049,6 +1522,13 @@ export default function App() {
               >
                 Keys
               </button>
+              <button
+                aria-pressed={sidePanel === "diagnostics"}
+                onClick={() => setSidePanel("diagnostics")}
+                type="button"
+              >
+                Status
+              </button>
             </div>
             <span>
               {sidePanel === "inspect"
@@ -1059,12 +1539,14 @@ export default function App() {
                   ? `${Math.max(0, dataRows.length - 1)} rows`
                   : sidePanel === "find"
                     ? `${findCount} matches`
-                    : sidePanel === "layers"
-                      ? `${layers.length} layers`
+                    : sidePanel === "outline"
+                      ? `${outlineItems.length} elements`
                       : sidePanel === "checkpoints"
                         ? `${checkpoints.length} saved`
                         : sidePanel === "shortcuts"
                           ? `${KEYBOARD_SHORTCUTS.length} shortcuts`
+                          : sidePanel === "diagnostics"
+                            ? previewStateLabel(previewStatus.state)
                           : `${auditFindings.length} issues`}
             </span>
           </div>
@@ -1101,13 +1583,17 @@ export default function App() {
               onFind={findInDocument}
               onReplace={replaceInDocument}
             />
-          ) : sidePanel === "layers" ? (
-            <LayerPanel
-              layers={layers}
+          ) : sidePanel === "outline" ? (
+            <OutlinePanel
+              items={outlineItems}
+              truncated={outlineTruncated}
               onSelect={(id) => {
                 setSidePanel("inspect");
                 postCommand("select", { id });
               }}
+              onHidden={(item, enabled) => postCommand("set-outline-hidden", { id: item.id, enabled })}
+              onLocked={(item, enabled) => postCommand("set-outline-locked", { id: item.id, enabled })}
+              onPickThrough={(item, enabled) => postCommand("set-picking-ignored", { id: item.id, enabled })}
               onZOrder={updateZOrder}
             />
           ) : sidePanel === "checkpoints" ? (
@@ -1120,6 +1606,8 @@ export default function App() {
             />
           ) : sidePanel === "shortcuts" ? (
             <ShortcutPanel />
+          ) : sidePanel === "diagnostics" ? (
+            <DiagnosticsPanel runtime={runtimeDiagnostics} onCopy={(text) => void copyDiagnosticsText(text)} />
           ) : selected ? (
             <Inspector
               selected={selected}
