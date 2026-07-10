@@ -2,6 +2,10 @@ node_modules
 dist
 out
 tmp
+test-results
+playwright-report
+.vscode-test
+*.vsix.sha256
 *.vsix
 /public/stress-fixtures/*.html
 .DS_Store
