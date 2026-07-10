@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Overlay hit testing</title><style>
+.card { position: relative; width: 360px; min-height: 180px; padding: 24px; border: 2px solid teal; }
+.overlay { position: absolute; inset: 0; background: rgba(255, 192, 64, .25); }
+.pass-through { pointer-events: none; inset: 48px; }
+</style></head><body>
+<main>
+  <article class="card"><h1>Selectable card content</h1><div class="overlay" aria-label="Blocking overlay"></div><div class="overlay pass-through" aria-label="Pass-through overlay"></div></article>
+</main>
+</body></html>

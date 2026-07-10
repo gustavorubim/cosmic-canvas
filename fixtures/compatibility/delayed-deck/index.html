@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Delayed deck fixture</title>
+  </head>
+  <body>
+    <main id="deck"></main>
+    <script>
+      window.setTimeout(() => {
+        document.querySelector("#deck").innerHTML = `
+          <section class="slide"><h1>Delayed slide one</h1></section>
+          <section class="slide"><h1>Delayed slide two</h1></section>
+        `;
+        parent.postMessage({ type: "fixture-slide-inserted" }, "*");
+      }, 400);
+    </script>
+  </body>
+</html>

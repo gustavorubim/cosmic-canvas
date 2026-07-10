@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Spoof resistance</title></head>
+  <body>
+    <main><h1>Trusted document</h1><p>The author script cannot impersonate the editor bridge.</p></main>
+    <script>
+      setTimeout(function () {
+        parent.postMessage({
+          type: "wysiwyg-deck",
+          activeId: "fake",
+          sessionToken: "author-controlled-token",
+          slides: [{ id: "fake", index: 0, title: "Spoofed Page", section: "", thumbnailHtml: "<p>fake</p>" }]
+        }, "*");
+      }, 20);
+    </script>
+  </body>
+</html>

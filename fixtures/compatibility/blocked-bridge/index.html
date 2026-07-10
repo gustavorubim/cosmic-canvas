@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Intentionally blocked bridge</title>
+<script>
+  window.MutationObserver = class BlockedMutationObserver {
+    constructor() { throw new Error("Intentional blocked-bridge fixture"); }
+  };
+</script>
+</head><body><main><h1>Bridge failure fixture</h1></main></body></html>

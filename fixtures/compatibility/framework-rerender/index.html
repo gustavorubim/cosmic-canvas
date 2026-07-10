@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Framework rerender</title></head><body>
+<main class="deck" id="app">
+  <section class="slide" data-title="Before rerender"><h1>Before rerender</h1><p id="replace-me">Select this text</p></section>
+  <section class="slide" data-title="Stable page"><h1>Stable page</h1></section>
+</main>
+<script>
+  setTimeout(() => {
+    const previous = document.querySelector("#replace-me");
+    const replacement = document.createElement("p");
+    replacement.id = "replacement";
+    replacement.textContent = "Framework replacement complete";
+    previous.replaceWith(replacement);
+  }, 400);
+</script>
+</body></html>

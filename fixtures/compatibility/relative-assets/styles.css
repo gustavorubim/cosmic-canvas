@@ -1,0 +1,19 @@
+@font-face {
+  font-family: "CosmicFixture";
+  src: url("fixture-font.ttf") format("truetype");
+  font-display: block;
+}
+
+body {
+  margin: 0;
+  background: rgb(238, 248, 246);
+  background-image: url("image.svg");
+  background-repeat: no-repeat;
+  background-position: right 16px top 16px;
+  font-family: "CosmicFixture", sans-serif;
+  color: rgb(31, 41, 51);
+}
+
+main {
+  padding: 32px;
+}
